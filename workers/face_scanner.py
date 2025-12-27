@@ -29,14 +29,10 @@ class FaceScannerWorker(QThread):
         self.project_path = project_path
         self.is_running = True
         
+        # We now use the FaceDB class for thread-safe matching
         self.face_db = FaceDB(project_path)
         self.db = Database(project_path)
         
-        # Load known data
-        self.known_encodings = self.face_db.known_encodings
-        self.known_ids = self.face_db.known_ids
-
-        # Threshold for Cosine Similarity (0.6 is standard for Facenet)
         self.match_threshold = 0.6
 
     def run(self):
@@ -64,15 +60,6 @@ class FaceScannerWorker(QThread):
         # 2. PREPARE WORKLOAD
         total_files = len(self.file_paths)
         
-        # Check for DB Version Mismatch (Dlib uses 128D, Facenet uses 512D)
-        if self.known_encodings:
-            if len(self.known_encodings[0]) == 128:
-                self.log_signal.emit("⚠️ Database mismatch (Dlib detected). Clearing old face DB...")
-                # In a production app, we might migrate. For now, we reset to prevent crashes.
-                self.known_encodings = []
-                self.known_ids = []
-                # (Optional: You could trigger self.face_db.clear() here)
-
         for idx, video_path in enumerate(self.file_paths):
             if not self.is_running: break
             
@@ -85,7 +72,7 @@ class FaceScannerWorker(QThread):
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            # Optimization: Scan 1 frame every 1.5 seconds (Balance speed/accuracy)
+            # Optimization: Scan 1 frame every 1.5 seconds
             step = int(fps * 1.5) if fps > 0 else 30
             
             unique_faces_in_file = set()
@@ -102,16 +89,15 @@ class FaceScannerWorker(QThread):
                 pil_img = Image.fromarray(img_rgb)
 
                 try:
-                    # A. DETECT FACES (Get bounding boxes)
+                    # A. DETECT FACES
                     boxes, _ = mtcnn.detect(pil_img)
                     
                     if boxes is not None:
-                        # B. EXTRACT TENSORS (Pre-processed for Resnet)
-                        # mtcnn.extract returns a tensor of shape [N, 3, 160, 160]
+                        # B. EXTRACT TENSORS
                         face_tensors = mtcnn.extract(pil_img, boxes, save_path=None)
                         
                         if face_tensors is not None:
-                            # C. GENERATE EMBEDDINGS (Batch process on GPU)
+                            # C. GENERATE EMBEDDINGS
                             face_tensors = face_tensors.to(device)
                             with torch.no_grad():
                                 embeddings = resnet(face_tensors).detach().cpu().numpy()
@@ -120,31 +106,18 @@ class FaceScannerWorker(QThread):
                             for i, embedding in enumerate(embeddings):
                                 box = boxes[i]
                                 
-                                # Find best match
-                                match_id = None
-                                min_dist = 100.0 # Arbitrary high start
-                                
-                                if self.known_encodings:
-                                    # Calculate Euclidean distances to all known faces
-                                    # (Facenet embeddings are roughly normalized)
-                                    dists = np.linalg.norm(self.known_encodings - embedding, axis=1)
-                                    min_index = np.argmin(dists)
-                                    min_dist = dists[min_index]
-                                    
-                                    if min_dist < self.match_threshold:
-                                        match_id = self.known_ids[min_index]
+                                # --- UPDATED LOGIC: Delegate math to FaceDB ---
+                                # This prevents the list-subtraction crash and handles locking
+                                match_id, dist = self.face_db.find_match(embedding, self.match_threshold)
 
                                 # Logic: New Person or Known?
                                 if match_id is None:
                                     match_id = self.face_db.get_next_id()
                                     self.face_db.add_face(match_id, embedding)
                                     
-                                    # Update local cache
-                                    self.known_encodings.append(embedding)
-                                    self.known_ids.append(match_id)
-                                    
-                                    # Generate Thumbnail from Original Image (Not the whitened tensor)
+                                    # Generate Thumbnail from Original Image
                                     x1, y1, x2, y2 = [int(b) for b in box]
+                                    
                                     # Clamp to image bounds
                                     h_img, w_img = img_rgb.shape[:2]
                                     x1, y1 = max(0, x1), max(0, y1)
@@ -168,10 +141,6 @@ class FaceScannerWorker(QThread):
 
                 except Exception as e:
                     pass # Skip frame on error
-
-                # Progress Update
-                percent = int((frame_num / total_frames) * 100)
-                # (Optional: emit percent if you want granular progress)
 
             cap.release()
 

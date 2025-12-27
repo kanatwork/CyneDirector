@@ -1,6 +1,7 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
 import torch
+import numpy as np
 from PIL import Image
 from core.ai_models import AIBackend
 from core.database import Database
@@ -18,12 +19,25 @@ class IndexerWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
-        self.batch_size = 32 
+        self.batch_size = 96
+        
+        # Smart Indexing Settings
+        self.scene_threshold = 0.7  # Similarity score (lower = distinct scene)
+        self.min_interval = 1.0     # Minimum 1 sec between frames (prevents burst)
+        self.max_interval = 20.0    # Force index every 20 secs (for long takes)
+
+    def calculate_histogram(self, image):
+        """Creates a color fingerprint for the frame to detect cuts."""
+        # Convert to HSV for better color perception
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        # Calculate hist: (Hue: 50 bins, Saturation: 60 bins)
+        hist = cv2.calcHist([hsv], [0, 1], None, [50, 60], [0, 180, 0, 256])
+        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+        return hist
 
     def run(self):
-        # NEW: Instant feedback for user
         self.progress_signal.emit(1)
-        self.log_signal.emit("Initializing AI Core...")
+        self.log_signal.emit("Initializing AI Core (Smart Mode)...")
         
         ai = AIBackend()
         db = Database(self.project_path)
@@ -47,38 +61,83 @@ class IndexerWorker(QThread):
             if not cap.isOpened(): continue
             
             fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0: fps = 24.0 # Fallback
+            
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            step = int(fps * 1.5) if fps > 0 else 30
             
             frames_batch = []
             timestamps_batch = []
             all_detected_indices = []
             
-            for frame_num in range(0, total_frames, step):
+            # --- SMART SCANNING VARIABLES ---
+            prev_hist = None
+            last_indexed_time = -self.max_interval # Ensure first frame is caught
+            
+            # Scan every 5th frame to speed up "Watching" 
+            # (We don't need to check every single frame for a cut)
+            scan_step = 5 
+            
+            for frame_num in range(0, total_frames, scan_step):
                 if not self.is_running: break
+                
+                # Update progress bar occasionally
+                if frame_num % 100 == 0:
+                    current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
+                    self.progress_signal.emit(current_percent)
+
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
                 ret, frame = cap.read()
                 if not ret: break
                 
-                img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                pil_img = Image.fromarray(img)
+                current_time = frame_num / fps
+                time_since_last = current_time - last_indexed_time
                 
-                frames_batch.append(pil_img)
-                timestamps_batch.append(frame_num / fps if fps > 0 else 0)
+                # 1. ALWAYS CAPTURE if max interval exceeded (Long take protection)
+                should_index = False
+                curr_hist = self.calculate_histogram(frame)
                 
-                if len(frames_batch) >= self.batch_size:
-                    self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
-                    frames_batch = []
-                    timestamps_batch = []
+                if time_since_last >= self.max_interval:
+                    should_index = True
+                    # self.log_signal.emit(f"   [Timed] {int(current_time)}s")
                 
-                current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
-                self.progress_signal.emit(current_percent)
+                # 2. CHECK SCENE CUT (if we are past min_interval)
+                elif time_since_last >= self.min_interval:
+                    if prev_hist is not None:
+                        # Compare histograms (Correlation)
+                        similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
+                        
+                        # If similarity drops below threshold, the scene changed
+                        if similarity < self.scene_threshold:
+                            should_index = True
+                            # self.log_signal.emit(f"   [Cut] {int(current_time)}s (Sim: {similarity:.2f})")
+                    else:
+                        should_index = True # Always index first valid frame
+
+                if should_index:
+                    # Queue for CLIP Analysis
+                    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_img = Image.fromarray(img_rgb)
+                    
+                    frames_batch.append(pil_img)
+                    timestamps_batch.append(current_time)
+                    
+                    # Update State
+                    prev_hist = curr_hist
+                    last_indexed_time = current_time
+
+                    # Process Batch if full
+                    if len(frames_batch) >= self.batch_size:
+                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
+                        frames_batch = []
+                        timestamps_batch = []
             
+            # Process remaining frames
             if frames_batch:
                 self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
             
             cap.release()
             
+            # --- GENERATE SUMMARY (Unchanged) ---
             if all_detected_indices:
                 counts = Counter(all_detected_indices)
                 top_common = counts.most_common(5) 
@@ -116,6 +175,7 @@ class IndexerWorker(QThread):
                 
                 similarity = (100.0 * img_features @ ai.tag_embeddings.T).softmax(dim=-1)
                 top_vals, top_indices = similarity.topk(3, dim=-1)
+                
                 all_detected_indices.extend(top_indices.cpu().numpy().flatten())
                 
         except Exception as e:

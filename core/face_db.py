@@ -52,22 +52,39 @@ class FaceDB:
                     self.known_ids = []
                     self.known_encodings = []
 
-    def save_encodings(self):
+    def find_match(self, embedding, threshold=0.6):
+        """
+        Thread-safe method to find the closest face in the DB.
+        Returns (person_id, distance) or (None, min_dist)
+        """
         with self._lock:
-            self._save_encodings_internal()
-
-    def save_names(self):
-        with self._lock:
-            self._save_names_internal()
+            if not self.known_encodings:
+                return None, 100.0
+            
+            try:
+                # Convert list of arrays to a single 2D matrix for vectorized math
+                known_matrix = np.array(self.known_encodings)
+                
+                # Calculate Euclidean distance to ALL faces at once
+                dists = np.linalg.norm(known_matrix - embedding, axis=1)
+                
+                # Find the best one
+                min_index = np.argmin(dists)
+                min_dist = dists[min_index]
+                
+                if min_dist < threshold:
+                    return self.known_ids[min_index], min_dist
+            except Exception as e:
+                print(f"Face Match Error: {e}")
+                
+            return None, 100.0
 
     def add_face(self, person_id, encoding):
-        # FIX: Locking logic covers the SAVE operation now
         with self._lock:
             self.known_ids.append(person_id)
             self.known_encodings.append(encoding)
             self.id_to_name[person_id] = person_id 
             
-            # Save while locked!
             self._save_encodings_internal()
             self._save_names_internal()
 
@@ -103,7 +120,6 @@ class FaceDB:
         with self._lock:
             return f"Person_{len(self.id_to_name) + 100}"
 
-    # Helpers (Assume Lock is already held)
     def _save_encodings_internal(self):
         data = { "ids": self.known_ids, "encodings": self.known_encodings }
         with open(self.encodings_path, 'wb') as f:

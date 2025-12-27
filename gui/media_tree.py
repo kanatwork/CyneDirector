@@ -1,24 +1,27 @@
 import os
-import cv2
 import json
 import time
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QAbstractItemView, QHeaderView, QMenu
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QBrush, QDragEnterEvent, QDropEvent
 from config import COLORS
+from core.media_engine import MediaEngine  # <--- NEW: Uses our robust FFmpeg wrapper
 
-# --- OPTIMIZED WORKER: Batch Emitting to prevent UI Freeze ---
+# --- WORKER: Batch Emitting + FFmpeg ---
 class FileMetadataLoader(QThread):
-    # CHANGED: Emits a LIST of tuples instead of single items
+    # Emits a LIST of tuples: [(path, res, fps, status_dict, summary), ...]
     batch_ready = pyqtSignal(list) 
 
     def __init__(self, file_paths):
         super().__init__()
         self.file_paths = file_paths
         self.is_running = True
-        self.batch_size = 15  # Update UI every 15 items
+        self.batch_size = 15  # Update UI in chunks of 15 to prevent freezing
 
     def run(self):
+        # Check if FFprobe is available once at start
+        has_ffprobe = MediaEngine.is_available()
+        
         batch = []
         for path in self.file_paths:
             if not self.is_running: break
@@ -27,19 +30,17 @@ class FileMetadataLoader(QThread):
             status = {'visuals': False, 'audio': False, 'faces': False}
             summary_str = ""
 
-            # 1. Video Metadata Read (We will swap this for FFmpeg later)
-            try:
-                cap = cv2.VideoCapture(path)
-                if cap.isOpened():
-                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    fps = cap.get(cv2.CAP_PROP_FPS)
+            # 1. ROBUST VIDEO METADATA READ (FFmpeg)
+            if has_ffprobe:
+                w, h, fps, dur = MediaEngine.get_metadata(path)
+                if w > 0 and h > 0:
                     res_str = f"{w}x{h}"
                     fps_str = f"{fps:.2f}"
-                cap.release()
-            except: pass
+            else:
+                # Fallback if FFmpeg is missing
+                res_str = "No FFprobe"
 
-            # 2. JSON Metadata Read
+            # 2. JSON Metadata Read (Existing Logic)
             json_path = f"{path}.json"
             if os.path.exists(json_path):
                 try:
@@ -63,13 +64,14 @@ class FileMetadataLoader(QThread):
                 batch = []
                 time.sleep(0.01) # Yield to UI thread briefly
 
-        # Emit remaining items
+        # Emit any remaining items
         if batch:
             self.batch_ready.emit(batch)
 
     def stop(self):
         self.is_running = False
 
+# --- MAIN TREE WIDGET ---
 class MediaTree(QTreeWidget):
     files_dropped_signal = pyqtSignal(list)
     clear_data_signal = pyqtSignal(list, str)
@@ -169,12 +171,13 @@ class MediaTree(QTreeWidget):
         self.is_updating = False
 
     def add_files_flat(self, file_paths):
+        # Filter duplicates
         existing_paths = set(self.get_all_file_paths())
         new_files = [p for p in file_paths if self.norm(p) not in existing_paths]
         
         if not new_files: return
 
-        # Create Pending Items
+        # Create "Pending" items immediately on Main Thread
         for path in new_files:
             item = QTreeWidgetItem(self)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDragEnabled)
@@ -189,6 +192,7 @@ class MediaTree(QTreeWidget):
             item.setText(6, "Waiting for scan...")
             item.setText(7, path)
         
+        # Start background loader
         self._start_loader_thread(new_files)
 
     def _start_loader_thread(self, files):
@@ -197,13 +201,13 @@ class MediaTree(QTreeWidget):
             self.loader_thread.wait()
         
         self.loader_thread = FileMetadataLoader(files)
-        # CONNECT TO BATCH SIGNAL
+        # Connect to BATCH signal
         self.loader_thread.batch_ready.connect(self._process_batch_update)
         self.loader_thread.start()
 
     def _process_batch_update(self, batch_data):
         """Receives a list of file updates to process at once."""
-        # Disable updates briefly for performance
+        # Disable updates briefly for performance boost
         self.setUpdatesEnabled(False)
         
         for data in batch_data:
@@ -213,12 +217,10 @@ class MediaTree(QTreeWidget):
         self.setUpdatesEnabled(True)
 
     def _update_item_data_internal(self, path, res, fps, status, summary):
-        # Optimized lookup: In production, we'd use a dict {path: item}, 
-        # but for now we iterate (still faster than emitting 1000 signals).
         target = self.norm(path)
         root = self.invisibleRootItem()
         
-        # Iterative search (DFS)
+        # Iterative Search (DFS) to find item by hidden path column
         stack = [root.child(i) for i in range(root.childCount())]
         while stack:
             item = stack.pop()
@@ -231,7 +233,6 @@ class MediaTree(QTreeWidget):
                 self._set_status_icon(item, 5, status['faces'])
                 return
             
-            # Add children to stack
             for i in range(item.childCount()):
                 stack.append(item.child(i))
 
@@ -278,6 +279,7 @@ class MediaTree(QTreeWidget):
                     it.setForeground(column_index, QBrush(QColor("#FFEB3B"))) 
                 else:
                     it.setForeground(column_index, QBrush(QColor("#444")))
+                
                 if summary_text: it.setText(6, summary_text)
                 return
             for i in range(it.childCount()):
