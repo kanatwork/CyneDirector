@@ -1969,8 +1969,6 @@ class MainWindow(QMainWindow):
 
     def update_audio_status(self, path):
         self.tree.mark_audio_done(path)
-        if self.current_preview_path and os.path.normpath(path) == os.path.normpath(self.current_preview_path):
-            self.update_preview_panel()
 
     def update_faces_status(self, path, count):
         self.tree.mark_faces_done(path)
@@ -2049,7 +2047,6 @@ class MainWindow(QMainWindow):
 ==================================================
 FILE: gui\media_tree.py
 ==================================================
-# [FILE: gui/media_tree.py]
 import os
 import json
 import time
@@ -2057,42 +2054,42 @@ from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QAbstractItemView, QHe
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QBrush, QDragEnterEvent, QDropEvent
 from config import COLORS
-from core.media_engine import MediaEngine 
+from core.media_engine import MediaEngine  # <--- NEW: Uses our robust FFmpeg wrapper
 
+# --- WORKER: Batch Emitting + FFmpeg ---
 class FileMetadataLoader(QThread):
-    # Updated signal signature: added duration string
+    # Emits a LIST of tuples: [(path, res, fps, status_dict, summary), ...]
     batch_ready = pyqtSignal(list) 
 
     def __init__(self, file_paths):
         super().__init__()
         self.file_paths = file_paths
         self.is_running = True
-        self.batch_size = 15 
+        self.batch_size = 15  # Update UI in chunks of 15 to prevent freezing
 
     def run(self):
+        # Check if FFprobe is available once at start
         has_ffprobe = MediaEngine.is_available()
+        
         batch = []
         for path in self.file_paths:
             if not self.is_running: break
             
-            res_str, fps_str, dur_str = "Unknown", "--", "--:--"
+            res_str, fps_str = "Unknown", "--"
             status = {'visuals': False, 'audio': False, 'faces': False}
             summary_str = ""
 
+            # 1. ROBUST VIDEO METADATA READ (FFmpeg)
             if has_ffprobe:
-                w, h, fps, dur_sec = MediaEngine.get_metadata(path)
-                if w > 0:
+                w, h, fps, dur = MediaEngine.get_metadata(path)
+                if w > 0 and h > 0:
                     res_str = f"{w}x{h}"
                     fps_str = f"{fps:.2f}"
-                    
-                    # Format Duration
-                    m, s = divmod(dur_sec, 60)
-                    h_dur, m = divmod(m, 60)
-                    if h_dur > 0:
-                        dur_str = f"{int(h_dur)}:{int(m):02}:{int(s):02}"
-                    else:
-                        dur_str = f"{int(m):02}:{int(s):02}"
+            else:
+                # Fallback if FFmpeg is missing
+                res_str = "No FFprobe"
 
+            # 2. JSON Metadata Read (Existing Logic)
             json_path = f"{path}.json"
             if os.path.exists(json_path):
                 try:
@@ -2101,45 +2098,48 @@ class FileMetadataLoader(QThread):
                         if data.get("tags"): status['visuals'] = True
                         if data.get("transcript"): status['audio'] = True
                         if data.get("faces"): status['faces'] = True
+                        
                         summary_str = data.get("summary", "")
+                        if status['audio'] and not summary_str: 
+                            summary_str = "Transcript available."
                 except: pass
             
-            # Add dur_str to payload
-            batch.append((path, res_str, fps_str, dur_str, status, summary_str))
+            # Add to batch
+            batch.append((path, res_str, fps_str, status, summary_str))
             
+            # Emit if batch is full
             if len(batch) >= self.batch_size:
                 self.batch_ready.emit(batch)
                 batch = []
-                time.sleep(0.01)
+                time.sleep(0.01) # Yield to UI thread briefly
 
+        # Emit any remaining items
         if batch:
             self.batch_ready.emit(batch)
 
     def stop(self):
         self.is_running = False
 
+# --- MAIN TREE WIDGET ---
 class MediaTree(QTreeWidget):
     files_dropped_signal = pyqtSignal(list)
     clear_data_signal = pyqtSignal(list, str)
 
     def __init__(self):
         super().__init__()
-        # Added DURATION at index 3
-        self.setHeaderLabels(["FILENAME", "RES", "FPS", "DUR", "👁️", "🔊", "👤", "AI SUMMARY", "FULL_PATH"])
+        self.setHeaderLabels(["FILENAME", "RES", "FPS", "👁️", "🔊", "👤", "AI SUMMARY", "FULL_PATH"])
         
         header = self.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Duration
         
-        # Updated indices for status icons (shifted by 1)
-        for col in [4, 5, 6]:
+        for col in [3, 4, 5]:
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
             header.resizeSection(col, 30)
             
-        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
-        self.setColumnHidden(8, True) # Full path is now index 8
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        self.setColumnHidden(7, True)
         
         self.setAlternatingRowColors(True)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
@@ -2149,8 +2149,10 @@ class MediaTree(QTreeWidget):
         
         self.is_updating = False
         self.itemClicked.connect(self.handle_click)
-        self.loader_thread = None
         
+        # Thread Management
+        self.loader_thread = None
+
         self.setStyleSheet(f"""
             QTreeWidget {{ background: {COLORS['bg_app']}; border: 1px solid {COLORS['border']}; border-radius: 4px; font-size: 13px; color: #DDD; }}
             QHeaderView::section {{ background: {COLORS['bg_panel']}; padding: 6px; border: none; border-bottom: 1px solid {COLORS['border']}; color: {COLORS['text_dim']}; font-weight: bold; }}
@@ -2158,7 +2160,6 @@ class MediaTree(QTreeWidget):
             QTreeWidget::item:selected {{ background: {COLORS['selection']}; color: {COLORS['accent']}; border-left: 2px solid {COLORS['accent']}; }}
         """)
 
-    # ... (Drag/Drop events unchanged) ...
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls(): event.accept()
         else: event.ignore()
@@ -2178,6 +2179,7 @@ class MediaTree(QTreeWidget):
     def contextMenuEvent(self, event):
         selected_files = self.get_selected_file_paths()
         if not selected_files: return
+
         menu = QMenu(self)
         menu.setStyleSheet(f"QMenu {{ background: #252526; color: white; border: 1px solid #444; }} QMenu::item:selected {{ background: {COLORS['accent']}; color: black; }}")
         
@@ -2186,6 +2188,7 @@ class MediaTree(QTreeWidget):
         act_clear_face = menu.addAction("Clear Face Data")
         
         action = menu.exec(self.mapToGlobal(event.pos()))
+        
         if action == act_clear_vis: self.clear_data_signal.emit(selected_files, 'visuals')
         elif action == act_clear_aud: self.clear_data_signal.emit(selected_files, 'audio')
         elif action == act_clear_face: self.clear_data_signal.emit(selected_files, 'faces')
@@ -2217,10 +2220,13 @@ class MediaTree(QTreeWidget):
         self.is_updating = False
 
     def add_files_flat(self, file_paths):
+        # Filter duplicates
         existing_paths = set(self.get_all_file_paths())
         new_files = [p for p in file_paths if self.norm(p) not in existing_paths]
+        
         if not new_files: return
 
+        # Create "Pending" items immediately on Main Thread
         for path in new_files:
             item = QTreeWidgetItem(self)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDragEnabled)
@@ -2229,13 +2235,13 @@ class MediaTree(QTreeWidget):
             item.setText(0, os.path.basename(path))
             item.setText(1, "...") 
             item.setText(2, "...") 
-            item.setText(3, "...") # Duration placeholder
+            item.setText(3, "⬜")
             item.setText(4, "⬜")
             item.setText(5, "⬜")
-            item.setText(6, "⬜")
-            item.setText(7, "Waiting for scan...")
-            item.setText(8, path) # Path moved to 8
+            item.setText(6, "Waiting for scan...")
+            item.setText(7, path)
         
+        # Start background loader
         self._start_loader_thread(new_files)
 
     def _start_loader_thread(self, files):
@@ -2244,31 +2250,38 @@ class MediaTree(QTreeWidget):
             self.loader_thread.wait()
         
         self.loader_thread = FileMetadataLoader(files)
+        # Connect to BATCH signal
         self.loader_thread.batch_ready.connect(self._process_batch_update)
         self.loader_thread.start()
 
     def _process_batch_update(self, batch_data):
+        """Receives a list of file updates to process at once."""
+        # Disable updates briefly for performance boost
         self.setUpdatesEnabled(False)
+        
         for data in batch_data:
-            path, res, fps, dur, status, summary = data
-            self._update_item_data_internal(path, res, fps, dur, status, summary)
+            path, res, fps, status, summary = data
+            self._update_item_data_internal(path, res, fps, status, summary)
+            
         self.setUpdatesEnabled(True)
 
-    def _update_item_data_internal(self, path, res, fps, dur, status, summary):
+    def _update_item_data_internal(self, path, res, fps, status, summary):
         target = self.norm(path)
         root = self.invisibleRootItem()
+        
+        # Iterative Search (DFS) to find item by hidden path column
         stack = [root.child(i) for i in range(root.childCount())]
         while stack:
             item = stack.pop()
-            if self.norm(item.text(8)) == target:
+            if self.norm(item.text(7)) == target:
                 item.setText(1, res)
                 item.setText(2, fps)
-                item.setText(3, dur)
-                item.setText(7, summary)
-                self._set_status_icon(item, 4, status['visuals'])
-                self._set_status_icon(item, 5, status['audio'])
-                self._set_status_icon(item, 6, status['faces'])
+                item.setText(6, summary)
+                self._set_status_icon(item, 3, status['visuals'])
+                self._set_status_icon(item, 4, status['audio'])
+                self._set_status_icon(item, 5, status['faces'])
                 return
+            
             for i in range(item.childCount()):
                 stack.append(item.child(i))
 
@@ -2281,23 +2294,23 @@ class MediaTree(QTreeWidget):
             item.setForeground(col, QBrush(QColor("#444")))
 
     def set_processing_icon(self, file_path, data_type):
-        col_map = {'visuals': 4, 'audio': 5, 'faces': 6}
+        col_map = {'visuals': 3, 'audio': 4, 'faces': 5}
         if data_type not in col_map: return
         self.update_item_status(file_path, col_map[data_type], "⏳")
 
     def mark_visuals_done(self, file_path, summary_text):
-        self.update_item_status(file_path, 4, "✅", summary_text)
+        self.update_item_status(file_path, 3, "✅", summary_text)
 
     def mark_audio_done(self, file_path):
-        self.update_item_status(file_path, 5, "✅")
+        self.update_item_status(file_path, 4, "✅")
 
     def mark_faces_done(self, file_path):
-        self.update_item_status(file_path, 6, "✅")
+        self.update_item_status(file_path, 5, "✅")
         
     def reset_status(self, file_path, data_type):
-        col = 4
-        if data_type == 'audio': col = 5
-        elif data_type == 'faces': col = 6
+        col = 3
+        if data_type == 'audio': col = 4
+        elif data_type == 'faces': col = 5
         self.update_item_status(file_path, col, "⬜")
 
     def update_item_status(self, file_path, column_index, icon_text, summary_text=None):
@@ -2307,7 +2320,7 @@ class MediaTree(QTreeWidget):
         
         while stack:
             it = stack.pop()
-            if self.norm(it.text(8)) == target_path:
+            if self.norm(it.text(7)) == target_path:
                 it.setText(column_index, icon_text)
                 if icon_text == "✅":
                     it.setForeground(column_index, QBrush(QColor(COLORS['accent'])))
@@ -2316,7 +2329,7 @@ class MediaTree(QTreeWidget):
                 else:
                     it.setForeground(column_index, QBrush(QColor("#444")))
                 
-                if summary_text: it.setText(7, summary_text)
+                if summary_text: it.setText(6, summary_text)
                 return
             for i in range(it.childCount()):
                 stack.append(it.child(i))
@@ -2327,13 +2340,13 @@ class MediaTree(QTreeWidget):
         stack = [root.child(i) for i in range(root.childCount())]
         while stack:
             it = stack.pop()
-            if it.childCount() == 0: paths.append(it.text(8))
+            if it.childCount() == 0: paths.append(it.text(7))
             for i in range(it.childCount()):
                 stack.append(it.child(i))
         return paths
     
     def get_selected_file_paths(self):
-        return [item.text(8) for item in self.selectedItems() if item.childCount() == 0]
+        return [item.text(7) for item in self.selectedItems() if item.childCount() == 0]
     
     def get_checked_file_paths(self):
         paths = []
@@ -2342,7 +2355,7 @@ class MediaTree(QTreeWidget):
         while stack:
             it = stack.pop()
             if it.childCount() == 0 and it.checkState(0) == Qt.CheckState.Checked:
-                paths.append(it.text(8))
+                paths.append(it.text(7))
             for i in range(it.childCount()):
                 stack.append(it.child(i))
         return paths
@@ -2350,7 +2363,6 @@ class MediaTree(QTreeWidget):
 ==================================================
 FILE: gui\metadata_panel.py
 ==================================================
-# [FILE: gui/metadata_panel.py]
 import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit, 
                              QTextEdit, QPushButton, QHBoxLayout, QMessageBox, QFrame)
@@ -2358,12 +2370,12 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from config import COLORS
 
 class MetadataPanel(QWidget):
+    # Signal to send data back to Main Window: (tags_list, summary_text)
     save_requested = pyqtSignal(list, str)
 
     def __init__(self):
         super().__init__()
         self.setStyleSheet(f"background: {COLORS['bg_panel']};")
-        self.is_editing = False # State tracker
         self.setup_ui()
         self.current_file_path = None
 
@@ -2372,27 +2384,11 @@ class MetadataPanel(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
-        # 1. Header with Filename & Edit Toggle
-        header_layout = QHBoxLayout()
-        
+        # 1. Header with Filename
         self.lbl_filename = QLabel("No Selection")
         self.lbl_filename.setStyleSheet(f"color: {COLORS['accent']}; font-weight: 900; font-size: 13px; letter-spacing: 0.5px;")
         self.lbl_filename.setWordWrap(True)
-        header_layout.addWidget(self.lbl_filename, stretch=1)
-        
-        self.btn_edit = QPushButton("✎ Edit")
-        self.btn_edit.setFixedSize(60, 25)
-        self.btn_edit.setCheckable(True)
-        self.btn_edit.clicked.connect(self.toggle_edit_mode)
-        self.btn_edit.setStyleSheet(f"""
-            QPushButton {{ background: transparent; border: 1px solid #555; color: #888; border-radius: 4px; font-size: 11px; font-weight: bold; }}
-            QPushButton:checked {{ background: {COLORS['accent']}; color: black; border: none; }}
-            QPushButton:hover {{ border-color: {COLORS['accent']}; color: {COLORS['accent']}; }}
-            QPushButton:checked:hover {{ color: black; }}
-        """)
-        header_layout.addWidget(self.btn_edit)
-        
-        layout.addLayout(header_layout)
+        layout.addWidget(self.lbl_filename)
 
         # Divider
         line = QFrame()
@@ -2401,34 +2397,44 @@ class MetadataPanel(QWidget):
         layout.addWidget(line)
 
         # 2. Tags Input
-        lbl_tags = QLabel("VISUAL KEYWORDS")
+        lbl_tags = QLabel("VISUAL TAGS (Comma separated)")
         lbl_tags.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; margin-top: 5px;")
         layout.addWidget(lbl_tags)
 
-        self.input_tags = QTextEdit() # Changed to TextEdit for multi-line tags
-        self.input_tags.setPlaceholderText("AI generated keywords will appear here...")
-        self.input_tags.setFixedHeight(80)
-        self.input_tags.setStyleSheet(self._get_input_style(read_only=True))
-        self.input_tags.setReadOnly(True)
+        self.input_tags = QLineEdit()
+        self.input_tags.setPlaceholderText("e.g. Wedding, Smile, Slow Motion...")
+        self.input_tags.setStyleSheet(f"""
+            QLineEdit {{
+                background: {COLORS['bg_input']}; color: {COLORS['text_main']};
+                border: 1px solid {COLORS['border']}; padding: 8px; border-radius: 4px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+        """)
         layout.addWidget(self.input_tags)
 
-        # 3. AI Summary
-        lbl_summary = QLabel("DESCRIPTION / SUMMARY")
+        # 3. AI Summary / Description Input
+        lbl_summary = QLabel("DESCRIPTION / AI SUMMARY")
         lbl_summary.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; margin-top: 5px;")
         layout.addWidget(lbl_summary)
 
         self.input_summary = QTextEdit()
-        self.input_summary.setPlaceholderText("Detailed description...")
-        self.input_summary.setStyleSheet(self._get_input_style(read_only=True))
-        self.input_summary.setReadOnly(True)
+        self.input_summary.setPlaceholderText("Detailed description of the clip...")
+        self.input_summary.setStyleSheet(f"""
+            QTextEdit {{
+                background: {COLORS['bg_input']}; color: {COLORS['text_main']};
+                border: 1px solid {COLORS['border']}; padding: 8px; border-radius: 4px;
+                font-family: 'Segoe UI', sans-serif; font-size: 12px; line-height: 1.4;
+            }}
+            QTextEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+        """)
         layout.addWidget(self.input_summary)
 
-        # 4. Save Button (Hidden by default)
+        # 4. Save Button
         self.btn_save = QPushButton("SAVE CHANGES")
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.clicked.connect(self.handle_save)
         self.btn_save.setFixedHeight(40)
-        self.btn_save.hide() 
         self.btn_save.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['accent']}; color: #121212;
@@ -2436,92 +2442,63 @@ class MetadataPanel(QWidget):
                 letter-spacing: 0.5px;
             }}
             QPushButton:hover {{ background: {COLORS['accent_hover']}; }}
+            QPushButton:pressed {{ background: #999; }}
+            QPushButton:disabled {{ background: #333; color: #555; }}
         """)
         layout.addWidget(self.btn_save)
         
+        # Add stretch to push everything up
         layout.addStretch()
+
+        # Start disabled until file selected
         self.clear()
-
-    def _get_input_style(self, read_only=True):
-        if read_only:
-            return f"""
-                QTextEdit {{
-                    background: {COLORS['bg_app']}; color: #CCC;
-                    border: 1px solid transparent; padding: 8px; border-radius: 4px;
-                    font-size: 12px; font-family: 'Segoe UI', sans-serif;
-                }}
-            """
-        else:
-            return f"""
-                QTextEdit {{
-                    background: {COLORS['bg_input']}; color: white;
-                    border: 1px solid {COLORS['border']}; padding: 8px; border-radius: 4px;
-                    font-size: 12px; font-family: 'Segoe UI', sans-serif;
-                }}
-                QTextEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
-            """
-
-    def toggle_edit_mode(self, checked):
-        self.is_editing = checked
-        self.input_tags.setReadOnly(not checked)
-        self.input_summary.setReadOnly(not checked)
-        
-        self.input_tags.setStyleSheet(self._get_input_style(not checked))
-        self.input_summary.setStyleSheet(self._get_input_style(not checked))
-        
-        if checked:
-            self.btn_save.show()
-            self.btn_edit.setText("Cancel")
-        else:
-            self.btn_save.hide()
-            self.btn_edit.setText("✎ Edit")
-            # Revert changes if cancelled? For now, we just hide button
-            if self.current_file_path:
-                # Reload data to revert any unsaved typing
-                # We need the main window to re-trigger load, or we store local cache.
-                # For simplicity in V2.1, we assume user saves or loses edits.
-                pass
 
     def load_data(self, file_path, tags, summary):
         self.current_file_path = file_path
         
-        # Reset Edit Mode
-        if self.btn_edit.isChecked():
-            self.btn_edit.setChecked(False)
-            self.toggle_edit_mode(False)
-        
+        # Clean filename for display
         name = file_path.split("/")[-1]
         if "\\" in name: name = name.split("\\")[-1]
         self.lbl_filename.setText(name.upper())
         
-        # Format tags nicely
-        tag_str = ", ".join(tags) if tags else "No tags yet."
+        # Join tags list into a string
+        tag_str = ", ".join(tags) if tags else ""
         self.input_tags.setText(tag_str)
-        self.input_summary.setText(summary if summary else "No summary available.")
         
-        self.btn_edit.setEnabled(True)
+        self.input_summary.setText(summary if summary else "")
+        
+        # Enable controls
+        self.input_tags.setEnabled(True)
+        self.input_summary.setEnabled(True)
+        self.btn_save.setEnabled(True)
+        self.btn_save.setText("SAVE CHANGES")
 
     def clear(self):
         self.current_file_path = None
         self.lbl_filename.setText("NO SELECTION")
         self.input_tags.clear()
         self.input_summary.clear()
-        self.btn_edit.setEnabled(False)
-        self.btn_edit.setChecked(False)
-        self.toggle_edit_mode(False)
+        
+        # Disable controls
+        self.input_tags.setEnabled(False)
+        self.input_summary.setEnabled(False)
+        self.btn_save.setEnabled(False)
+        self.btn_save.setText("SAVE CHANGES")
 
     def handle_save(self):
         if not self.current_file_path: return
         
-        raw_tags = self.input_tags.toPlainText().split(',')
+        # Parse tags back into list
+        raw_tags = self.input_tags.text().split(',')
         clean_tags = [t.strip() for t in raw_tags if t.strip()]
+        
         summary = self.input_summary.toPlainText()
         
+        # Emit signal to Main Window
         self.save_requested.emit(clean_tags, summary)
         
-        # Exit edit mode
-        self.btn_edit.setChecked(False)
-        self.toggle_edit_mode(False)
+        # Visual Feedback
+        self.btn_save.setText("SAVED!")
 
 ==================================================
 FILE: gui\player_window.py
@@ -3415,7 +3392,6 @@ class FolderImportWorker(QThread):
 ==================================================
 FILE: workers\indexer.py
 ==================================================
-# [FILE: workers/indexer.py]
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
 import torch
@@ -3424,7 +3400,7 @@ from PIL import Image
 from core.ai_models import AIBackend
 from core.database import Database
 from core.tags import get_tag_bank
-from collections import defaultdict
+from collections import Counter
 
 class IndexerWorker(QThread):
     log_signal = pyqtSignal(str)       
@@ -3437,23 +3413,25 @@ class IndexerWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
-        self.batch_size = 64 # Smaller batch size for better VRAM management during heavy inference
+        self.batch_size = 96
         
-        # --- Smart Indexing Settings ---
-        self.scene_threshold = 0.65  # Slightly more sensitive to cuts
-        self.min_interval = 1.0      # Min 1 sec between keyframes
-        self.max_interval = 15.0     # Max 15 sec (catch slow pans)
+        # Smart Indexing Settings
+        self.scene_threshold = 0.7  # Similarity score (lower = distinct scene)
+        self.min_interval = 1.0     # Minimum 1 sec between frames (prevents burst)
+        self.max_interval = 20.0    # Force index every 20 secs (for long takes)
 
     def calculate_histogram(self, image):
         """Creates a color fingerprint for the frame to detect cuts."""
+        # Convert to HSV for better color perception
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        # Calculate hist: (Hue: 50 bins, Saturation: 60 bins)
         hist = cv2.calcHist([hsv], [0, 1], None, [50, 60], [0, 180, 0, 256])
         cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
         return hist
 
     def run(self):
         self.progress_signal.emit(1)
-        self.log_signal.emit("Initializing AI Core (Smart Weighting Mode)...")
+        self.log_signal.emit("Initializing AI Core (Smart Mode)...")
         
         ai = AIBackend()
         db = Database(self.project_path)
@@ -3471,32 +3449,32 @@ class IndexerWorker(QThread):
         for idx, video_path in enumerate(self.file_paths):
             if not self.is_running: break
             
-            self.log_signal.emit(f"Deep Scanning: {video_path}")
+            self.log_signal.emit(f"Indexing: {video_path}")
             
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened(): continue
             
             fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps <= 0: fps = 24.0
+            if fps <= 0: fps = 24.0 # Fallback
+            
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
             frames_batch = []
             timestamps_batch = []
+            all_detected_indices = []
             
-            # --- ACCUMULATOR FOR SMART TAGS ---
-            # Format: { 'TagString': accumulated_score }
-            tag_scores = defaultdict(float)
-            
+            # --- SMART SCANNING VARIABLES ---
             prev_hist = None
-            last_indexed_time = -self.max_interval
+            last_indexed_time = -self.max_interval # Ensure first frame is caught
             
-            # Scan Step: Adaptive based on FPS (approx every 0.2s check)
-            scan_step = int(fps / 5) if fps > 20 else 2
+            # Scan every 5th frame to speed up "Watching" 
+            # (We don't need to check every single frame for a cut)
+            scan_step = 5 
             
             for frame_num in range(0, total_frames, scan_step):
                 if not self.is_running: break
                 
-                # Progress update
+                # Update progress bar occasionally
                 if frame_num % 100 == 0:
                     current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
                     self.progress_signal.emit(current_percent)
@@ -3507,119 +3485,93 @@ class IndexerWorker(QThread):
                 
                 current_time = frame_num / fps
                 time_since_last = current_time - last_indexed_time
-                should_index = False
                 
+                # 1. ALWAYS CAPTURE if max interval exceeded (Long take protection)
+                should_index = False
                 curr_hist = self.calculate_histogram(frame)
                 
-                # 1. Force Keyframe if max interval reached
                 if time_since_last >= self.max_interval:
                     should_index = True
+                    # self.log_signal.emit(f"   [Timed] {int(current_time)}s")
                 
-                # 2. Scene Cut Detection
+                # 2. CHECK SCENE CUT (if we are past min_interval)
                 elif time_since_last >= self.min_interval:
                     if prev_hist is not None:
+                        # Compare histograms (Correlation)
                         similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
+                        
+                        # If similarity drops below threshold, the scene changed
                         if similarity < self.scene_threshold:
                             should_index = True
+                            # self.log_signal.emit(f"   [Cut] {int(current_time)}s (Sim: {similarity:.2f})")
                     else:
-                        should_index = True
+                        should_index = True # Always index first valid frame
 
                 if should_index:
+                    # Queue for CLIP Analysis
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     pil_img = Image.fromarray(img_rgb)
                     
                     frames_batch.append(pil_img)
                     timestamps_batch.append(current_time)
                     
+                    # Update State
                     prev_hist = curr_hist
                     last_indexed_time = current_time
 
+                    # Process Batch if full
                     if len(frames_batch) >= self.batch_size:
-                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, tag_list, tag_scores)
+                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
                         frames_batch = []
                         timestamps_batch = []
-
-            # Process remaining
+            
+            # Process remaining frames
             if frames_batch:
-                self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, tag_list, tag_scores)
+                self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
             
             cap.release()
             
-            # --- FINAL TAG SELECTION ---
-            # Sort tags by their accumulated score (Highest confidence + frequency)
-            sorted_tags = sorted(tag_scores.items(), key=lambda item: item[1], reverse=True)
-            
-            # Filter: Take top 15 tags, but only if they have a decent score
-            final_tags = [tag for tag, score in sorted_tags[:15] if score > 0.5]
-            
-            # If the list is empty (dark video?), take at least top 3
-            if not final_tags and sorted_tags:
-                final_tags = [t[0] for t in sorted_tags[:3]]
-
-            # Generate Summary Text
-            if final_tags:
-                # First 5 tags are "Primary", rest are "Context"
-                primary = ", ".join(final_tags[:5])
-                base_summary = f"Visuals: {primary}"
+            # --- GENERATE SUMMARY (Unchanged) ---
+            if all_detected_indices:
+                counts = Counter(all_detected_indices)
+                top_common = counts.most_common(5) 
+                summary_tags = [tag_list[i] for i, count in top_common]
+                base_summary = f"Visuals: {', '.join(summary_tags)}"
             else:
-                base_summary = "No clear visual subjects identified."
+                summary_tags = []
+                base_summary = "No clear visual subjects"
 
-            # Merge with Transcript if available
             current_meta = db.get_video_metadata(video_path)
             transcript_data = current_meta.get("transcript", [])
             
             if transcript_data:
-                # Use first 15 words of transcript
-                full_text = " ".join([t['text'] for t in transcript_data])
-                words = full_text.split()[:15]
-                text_preview = " ".join(words)
-                summary_text = f"{base_summary} | Audio: \"{text_preview}...\""
+                text_preview = " ".join([t['text'] for t in transcript_data[:6]])
+                summary_text = f"{base_summary}. Audio: {text_preview}..."
             else:
                 summary_text = base_summary
 
-            db.save_tags(video_path, final_tags, summary_text)
+            db.save_tags(video_path, summary_tags, summary_text)
             self.summary_signal.emit(video_path, summary_text)
         
         ai.unload_models()
         self.progress_signal.emit(100)
         self.finished_signal.emit()
 
-    def process_batch(self, images, timestamps, ai, db, video_path, model, processor, tag_list, tag_scores):
+    def process_batch(self, images, timestamps, ai, db, video_path, model, processor, all_detected_indices):
         try:
             inputs = processor(images=images, return_tensors="pt", padding=True).to(ai.device)
             with torch.no_grad():
                 img_features = model.get_image_features(**inputs)
                 img_features /= img_features.norm(p=2, dim=-1, keepdim=True)
                 
-                # 1. Save Vector Embeddings (For "Find Similar" search)
                 vectors_list = img_features.cpu().numpy().tolist()
                 db.add_visual_embeddings(video_path, vectors_list, timestamps)
                 
-                # 2. Calculate Tag Probabilities (Dot Product)
-                # similarity shape: [batch_size, num_tags]
                 similarity = (100.0 * img_features @ ai.tag_embeddings.T).softmax(dim=-1)
+                top_vals, top_indices = similarity.topk(3, dim=-1)
                 
-                # Get top 5 tags for EACH frame in the batch
-                # values: [batch_size, 5], indices: [batch_size, 5]
-                values, indices = similarity.topk(5, dim=-1)
+                all_detected_indices.extend(top_indices.cpu().numpy().flatten())
                 
-                vals_np = values.cpu().numpy()
-                inds_np = indices.cpu().numpy()
-                
-                # 3. Accumulate Weighted Scores
-                for i in range(len(images)):
-                    for rank in range(5):
-                        tag_idx = inds_np[i][rank]
-                        confidence = vals_np[i][rank] # 0.0 to 1.0 (after softmax)
-                        tag_name = tag_list[tag_idx]
-                        
-                        # LOGIC: 
-                        # - We add the raw confidence to the global score.
-                        # - If "Dog" appears in 10 frames with 0.9 confidence, score = 9.0
-                        # - If "Cat" appears in 1 frame with 0.9 confidence, score = 0.9
-                        # - This naturally favors sustained objects but catches distinct high-confidence ones.
-                        tag_scores[tag_name] += confidence
-
         except Exception as e:
             print(f"Batch Error: {e}")
 

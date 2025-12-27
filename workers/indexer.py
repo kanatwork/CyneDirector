@@ -133,11 +133,11 @@ class IndexerWorker(QThread):
             sorted_tags = sorted(tag_scores.items(), key=lambda item: item[1], reverse=True)
             
             # Filter: Take top 15 tags, but only if they have a decent score
-            final_tags = [tag for tag, score in sorted_tags[:15] if score > 0.5]
+            final_tags = [tag for tag, score in sorted_tags[:25] if score > 0.05]
             
             # If the list is empty (dark video?), take at least top 3
             if not final_tags and sorted_tags:
-                final_tags = [t[0] for t in sorted_tags[:3]]
+                final_tags = [t[0] for t in sorted_tags[:5]]
 
             # Generate Summary Text
             if final_tags:
@@ -184,14 +184,14 @@ class IndexerWorker(QThread):
                 
                 # Get top 5 tags for EACH frame in the batch
                 # values: [batch_size, 5], indices: [batch_size, 5]
-                values, indices = similarity.topk(5, dim=-1)
+                values, indices = similarity.topk(15, dim=-1)
                 
                 vals_np = values.cpu().numpy()
                 inds_np = indices.cpu().numpy()
                 
                 # 3. Accumulate Weighted Scores
-                for i in range(len(images)):
-                    for rank in range(5):
+                for i in range(len(images)):    
+                    for rank in range(15):
                         tag_idx = inds_np[i][rank]
                         confidence = vals_np[i][rank] # 0.0 to 1.0 (after softmax)
                         tag_name = tag_list[tag_idx]
