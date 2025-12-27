@@ -223,77 +223,6 @@ if __name__ == "__main__":
     test_ai_system()
 
 ==================================================
-FILE: fetch_vocab.py
-==================================================
-# FILE: fetch_vocab_pro.py
-import requests
-import re
-
-# 1. ImageNet-21k (The "Everything" List - ~21,000 tags)
-# Source: Google Research Big Transfer (BiT) official repository
-URL_IMAGENET = "https://storage.googleapis.com/bit_models/imagenet21k_wordnet_lemmas.txt"
-
-# 2. Places365 (The "Environments" List - 365 tags)
-# Source: MIT CSAIL Vision official repository
-URL_PLACES = "https://raw.githubusercontent.com/CSAILVision/places365/master/categories_places365.txt"
-
-def fetch_master_list():
-    print("🚀 CONTACTING DATABASES...")
-    
-    full_vocab = set()
-
-    # --- FETCH IMAGENET-21K ---
-    try:
-        print(f"   ⬇️  Downloading ImageNet-21k (21,000+ concepts)...")
-        resp = requests.get(URL_IMAGENET)
-        if resp.status_code == 200:
-            lines = resp.text.split('\n')
-            for line in lines:
-                # ImageNet formatting is sometimes "noun, synonym". We just want the first one.
-                # Example: "espresso_maker, espresso_machine" -> "Espresso maker"
-                clean = line.split(',')[0].replace('_', ' ').strip()
-                if len(clean) > 2:
-                    full_vocab.add(clean.title())
-        else:
-            print("   ❌ Error reaching ImageNet server.")
-    except Exception as e:
-        print(f"   ❌ ImageNet failed: {e}")
-
-    # --- FETCH PLACES365 ---
-    try:
-        print(f"   ⬇️  Downloading Places365 (Environments)...")
-        resp = requests.get(URL_PLACES)
-        if resp.status_code == 200:
-            lines = resp.text.split('\n')
-            for line in lines:
-                # Format: "/a/airfield" -> "Airfield"
-                parts = line.split(' ')
-                if parts:
-                    clean = parts[0].split('/')[-1].replace('_', ' ').strip()
-                    if len(clean) > 2:
-                        full_vocab.add(clean.title())
-        else:
-            print("   ❌ Error reaching MIT server.")
-    except Exception as e:
-        print(f"   ❌ Places365 failed: {e}")
-
-    # --- SAVE TO DISK ---
-    final_list = sorted(list(full_vocab))
-    
-    with open("vocabulary.txt", "w", encoding="utf-8") as f:
-        for word in final_list:
-            f.write(word + "\n")
-
-    print(f"\n✅ SUCCESS! Master vocabulary built.")
-    print(f"   📚 Total unique tags: {len(final_list)}")
-    print(f"   📂 Saved to: {os.path.abspath('vocabulary.txt')}")
-    print("   (Restart CyneDirector to load this new brain)")
-
-if __name__ == "__main__":
-    import os
-    fetch_master_list()
-
-==================================================
 FILE: main.py
 ==================================================
 import sys
@@ -476,38 +405,42 @@ class AIBackend:
                 if cls._instance is None:
                     cls._instance = super(AIBackend, cls).__new__(cls)
                     
-                    # --- RTX 5070 OPTIMIZATION ---
+                    # --- PERFORMANCE OPTIMIZATION FOR RTX 40/50 SERIES ---
                     if torch.cuda.is_available():
                         cls._instance.device = "cuda"
-                        # Use Float16 for massive speedup and VRAM savings
-                        cls._instance.dtype = torch.float16 
                         
+                        # 1. Enable cuDNN Benchmark (Finds fastest algo for your GPU)
                         torch.backends.cudnn.benchmark = True 
+                        
+                        # 2. Enable TensorFloat-32 (TF32) - CRITICAL FOR SPEED
                         torch.backends.cuda.matmul.allow_tf32 = True
                         torch.backends.cudnn.allow_tf32 = True
-                        print(f"🚀 AI ACCELERATION: ON ({torch.cuda.get_device_name(0)}) | Precision: Float16")
+                        
+                        # 3. High Precision Matrix Mul
+                        try:
+                            torch.set_float32_matmul_precision('high')
+                        except AttributeError:
+                            pass 
+
+                        print(f"🚀 AI ACCELERATION: ON ({torch.cuda.get_device_name(0)})")
+                        print("   ✅ TensorFloat-32 (TF32) Enabled")
                     else:
                         cls._instance.device = "cpu"
-                        cls._instance.dtype = torch.float32
-                        print("⚠️ WARNING: RUNNING ON CPU.")
+                        print("⚠️ WARNING: RUNNING ON CPU. INDEXING WILL BE SLOW.")
 
-                    # Model Placeholders
                     cls._instance.clip_model = None
                     cls._instance.clip_processor = None
-                    cls._instance.blip_model = None
-                    cls._instance.blip_processor = None
                     cls._instance.whisper_model = None
                     cls._instance.tag_embeddings = None
                     cls._instance.load_lock = threading.Lock() 
             
         return cls._instance
 
-    # --- 1. CLIP (Keywords) ---
     def load_clip(self):
         with self.load_lock:
             if self.clip_model: return self.clip_model, self.clip_processor
             
-            print(f"Loading CLIP (Search Engine) on {self.device}...")
+            print(f"Loading CLIP (Large) on {self.device}...")
             try:
                 from transformers import CLIPProcessor, CLIPModel
                 from core.tags import get_tag_bank
@@ -516,11 +449,12 @@ class AIBackend:
                 self.clip_processor = CLIPProcessor.from_pretrained(model_name)
                 self.clip_model = CLIPModel.from_pretrained(model_name).to(self.device)
                 
-                # Pre-compute Tag Embeddings
-                print("Building Search Index...")
+                # Pre-compute Tag Embeddings with larger batch
+                print("Pre-computing Tag Embeddings...")
                 tags = get_tag_bank()
                 tag_embeddings_list = []
                 
+                # Increased batch size for initialization
                 batch_size = 100 
                 for i in range(0, len(tags), batch_size):
                     batch_tags = tags[i:i+batch_size]
@@ -534,73 +468,42 @@ class AIBackend:
                 return self.clip_model, self.clip_processor
 
             except Exception as e:
-                print(f"CLIP LOAD ERROR: {e}")
+                print(f"AI LOAD ERROR: {e}")
                 raise e
 
-    # --- 2. BLIP-2 (Action Description - THE UPGRADE) ---
-    def load_blip(self):
-        with self.load_lock:
-            if self.blip_model: return self.blip_model, self.blip_processor
-            
-            print(f"Loading BLIP-2 (Advanced Captioning) on {self.device}...")
-            try:
-                # We use Blip2Processor and Blip2ForConditionalGeneration
-                from transformers import Blip2Processor, Blip2ForConditionalGeneration
-                
-                # "opt-2.7b" is the sweet spot. Much smarter than base BLIP, but fits on GPU.
-                model_name = "Salesforce/blip2-opt-2.7b"
-                
-                self.blip_processor = Blip2Processor.from_pretrained(model_name)
-                # Load in Float16 to save memory
-                self.blip_model = Blip2ForConditionalGeneration.from_pretrained(
-                    model_name, 
-                    torch_dtype=self.dtype
-                ).to(self.device)
-                
-                return self.blip_model, self.blip_processor
-            except Exception as e:
-                print(f"BLIP-2 LOAD ERROR: {e}")
-                raise e
-
-    # --- 3. WHISPER (Audio) ---
     def load_whisper(self):
         with self.load_lock:
             if self.whisper_model: return self.whisper_model
             
-            print(f"Loading Faster-Whisper on {self.device}...")
+            print(f"Loading Faster-Whisper (Large-v3) on {self.device}...")
             from faster_whisper import WhisperModel
             
             try:
                 device_str = "cuda" if self.device == "cuda" else "cpu"
                 compute_type = "float16" if self.device == "cuda" else "int8"
+                
                 self.whisper_model = WhisperModel("large-v3", device=device_str, compute_type=compute_type)
+
             except Exception as e:
                 print(f"Whisper Load Error: {e}")
                 raise e
+                
             return self.whisper_model
 
     def unload_models(self):
         with self.load_lock:
             print("🧹 Unloading AI Models...")
-            
             if self.clip_model:
                 del self.clip_model
                 del self.clip_processor
                 del self.tag_embeddings
-            
-            if self.blip_model:
-                del self.blip_model
-                del self.blip_processor
-
+                self.clip_model = None
+                self.clip_processor = None
+                self.tag_embeddings = None
+                
             if self.whisper_model:
                 del self.whisper_model
-                
-            self.clip_model = None
-            self.clip_processor = None
-            self.blip_model = None
-            self.blip_processor = None
-            self.whisper_model = None
-            self.tag_embeddings = None
+                self.whisper_model = None
 
             gc.collect()
             if torch.cuda.is_available():
@@ -1516,7 +1419,6 @@ class FacesTab(QWidget):
 ==================================================
 FILE: gui\main_window.py
 ==================================================
-# [FILE: gui/main_window.py]
 import os
 import json
 import cv2 
@@ -1534,6 +1436,7 @@ from gui.media_tree import MediaTree
 from gui.faces_tab import FacesTab
 from gui.search_tab import SearchTab
 from gui.player_window import PlayerWindow
+# NEW IMPORT:
 from gui.metadata_panel import MetadataPanel 
 from core.ai_models import AIBackend
 
@@ -1545,10 +1448,6 @@ class MainWindow(QMainWindow):
         self.project_file = os.path.join(self.project_path, f"{self.project_name}{FILE_EXT}")
         self.is_dirty = False
         
-        # --- FIX: Initialize this variable explicitly to prevent crash ---
-        self.current_preview_path = None 
-        # ----------------------------------------------------------------
-
         self.setWindowTitle(f"{APP_NAME} - {project_name}")
         self.resize(1600, 950)
         
@@ -1777,9 +1676,11 @@ class MainWindow(QMainWindow):
         self.preview_lbl.setMinimumHeight(250)
         pp_layout.addWidget(self.preview_lbl)
         
+        # --- NEW: METADATA PANEL REPLACES TEXT BROWSER ---
         self.meta_panel = MetadataPanel()
         self.meta_panel.save_requested.connect(self.save_metadata_handler)
         pp_layout.addWidget(self.meta_panel)
+        # -------------------------------------------------
         
         splitter.addWidget(self.preview_panel)
         splitter.setSizes([900, 400])
@@ -1840,42 +1741,63 @@ class MainWindow(QMainWindow):
             self.preview_lbl.setText("Preview unavailable")
 
         # 2. Load Metadata into Editor
+        json_path = f"{file_path}.json"
+        
         tags = []
         summary = ""
         
-        try:
-            data = self.db.get_video_metadata(file_path)
-            tags = data.get("tags", [])
-            summary = data.get("summary", "")
-            
-            if not summary:
-                trans_data = data.get("transcript", [])
-                if isinstance(trans_data, list) and trans_data:
-                    preview_text = " ".join([seg['text'] for seg in trans_data[:10]])
-                    summary = f"(Auto-Transcript): {preview_text}..."
-        except Exception as e:
-            print(f"Meta load error: {e}")
+        if os.path.exists(json_path):
+            try:
+                # DATABASE READING IS SAFE NOW (Thread Locked)
+                data = self.db.get_video_metadata(file_path)
+                tags = data.get("tags", [])
+                
+                # Check summary logic
+                summary = data.get("summary", "")
+                
+                # If no summary but transcript exists, append a snippet
+                if not summary:
+                    trans_data = data.get("transcript", [])
+                    if isinstance(trans_data, list) and trans_data:
+                        preview_text = " ".join([seg['text'] for seg in trans_data[:10]])
+                        summary = f"(Auto-Transcript Snippet): {preview_text}..."
+                    elif isinstance(trans_data, str) and trans_data:
+                        summary = trans_data
+                        
+            except Exception as e:
+                print(f"Meta load error: {e}")
             
         self.meta_panel.load_data(file_path, tags, summary)
 
     def save_metadata_handler(self, new_tags, new_summary):
+        """ Handles the save event from the Metadata Panel """
         if not self.current_preview_path: return
+        
         try:
+            # 1. Update Database
             self.db.save_tags(self.current_preview_path, new_tags, new_summary)
+            
+            # 2. Update UI Tree (Mark visual checkmark as done if tags exist)
             if new_tags:
                 self.tree.mark_visuals_done(self.current_preview_path, new_summary)
+            
+            # 3. Re-index for Search
+            # This ensures the new tags are immediately searchable
             self.search_tab.engine.build_index([self.current_preview_path])
+            
             self.status_label.setText(f"Saved metadata for {os.path.basename(self.current_preview_path)}")
             self.mark_dirty()
+            
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Could not save metadata: {e}")
 
-    # --- Standard Handlers ---
+    # --- Standard Handlers (Keep unchanged) ---
     def fmt_time(self, seconds):
         m, s = divmod(seconds, 60)
         return f"{int(m):02}:{int(s):02}"
 
     def handle_transcript_click(self, url):
+        # Deprecated by new panel, but logic kept for reference if needed later
         pass
 
     def add_files(self):
@@ -2024,9 +1946,12 @@ class MainWindow(QMainWindow):
     def worker_finished(self):
         self.lock_buttons(False)
         self.progress_bar.hide()
+        
+        # FIX: Only say "Task Complete" if the last message wasn't an error
         current_text = self.status_label.text()
         if "CRITICAL" not in current_text and "Error" not in current_text:
             self.status_label.setText("Task Complete.")
+            
         self.mark_dirty()
         self.search_tab.engine.build_index(self.tree.get_all_file_paths())
         self.worker = None
@@ -2041,13 +1966,6 @@ class MainWindow(QMainWindow):
         
     def update_visuals_status(self, path, summary_text):
         self.tree.mark_visuals_done(path, summary_text)
-        
-        # --- FIXED: CRASH PREVENTION ---
-        # Only try to update the preview panel if we have a valid selection path
-        if self.current_preview_path and path:
-            # Normalize paths to ensure they match (Windows slash fix)
-            if os.path.normpath(path).lower() == os.path.normpath(self.current_preview_path).lower():
-                self.update_preview_panel()
 
     def update_audio_status(self, path):
         self.tree.mark_audio_done(path)
@@ -2082,6 +2000,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Already Done", f"All selected files have already been scanned for {check_key}.")
                 return []
             return filtered
+            
         return selected
 
     def run_indexing(self):
@@ -3518,40 +3437,29 @@ class IndexerWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
-        self.batch_size = 64 
+        self.batch_size = 64 # Smaller batch size for better VRAM management during heavy inference
         
-        # --- Logic Settings ---
-        self.scene_threshold = 0.60  # Sensitivity to scene changes (Lower = more sensitive)
-        self.min_interval = 1.0      # Minimum time between scanning frames
-        self.max_interval = 15.0     # <--- FIXED: Restored missing attribute
-        self.blur_threshold = 100.0  # Frames below this score are considered "Motion Blurs" and ignored
+        # --- Smart Indexing Settings ---
+        self.scene_threshold = 0.65  # Slightly more sensitive to cuts
+        self.min_interval = 1.0      # Min 1 sec between keyframes
+        self.max_interval = 15.0     # Max 15 sec (catch slow pans)
 
     def calculate_histogram(self, image):
-        """Creates a color fingerprint for the frame to detect cuts/motion."""
+        """Creates a color fingerprint for the frame to detect cuts."""
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         hist = cv2.calcHist([hsv], [0, 1], None, [50, 60], [0, 180, 0, 256])
         cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
         return hist
 
-    def calculate_sharpness(self, image):
-        """
-        Returns a score representing how focused the image is.
-        Low score (<100) usually means fast camera movement (Blur).
-        """
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        return cv2.Laplacian(gray, cv2.CV_64F).var()
-
     def run(self):
         self.progress_signal.emit(1)
-        self.log_signal.emit("Initializing Smart-Action AI (Blur-Gate Enabled)...")
+        self.log_signal.emit("Initializing AI Core (Smart Weighting Mode)...")
         
         ai = AIBackend()
         db = Database(self.project_path)
         
         try:
-            # Load BOTH Models (CLIP for tags, BLIP-2 for descriptions)
-            clip_model, clip_processor = ai.load_clip()
-            blip_model, blip_processor = ai.load_blip()
+            model, processor = ai.load_clip()
         except Exception as e:
             self.log_signal.emit(f"AI Load Error: {e}")
             self.finished_signal.emit()
@@ -3563,7 +3471,7 @@ class IndexerWorker(QThread):
         for idx, video_path in enumerate(self.file_paths):
             if not self.is_running: break
             
-            self.log_signal.emit(f"Deep Analysis: {video_path}")
+            self.log_signal.emit(f"Deep Scanning: {video_path}")
             
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened(): continue
@@ -3572,30 +3480,24 @@ class IndexerWorker(QThread):
             if fps <= 0: fps = 24.0
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            # --- SCENE CONTAINER ---
-            # We store "Candidate Frames" for each distinct scene found in the clip
-            # Structure: [ {'best_frame': img, 'score': 0.0}, ... ]
-            detected_scenes = []
-            
-            # Current scene tracker
-            current_scene = {'best_frame': None, 'score': -1.0}
-            
-            # Batching for CLIP (Tags)
             frames_batch = []
             timestamps_batch = []
+            
+            # --- ACCUMULATOR FOR SMART TAGS ---
+            # Format: { 'TagString': accumulated_score }
             tag_scores = defaultdict(float)
             
             prev_hist = None
             last_indexed_time = -self.max_interval
             
-            # Scan 3 times per second (balance between speed and accuracy)
-            scan_step = int(fps / 3) if fps > 10 else 1
+            # Scan Step: Adaptive based on FPS (approx every 0.2s check)
+            scan_step = int(fps / 5) if fps > 20 else 2
             
             for frame_num in range(0, total_frames, scan_step):
                 if not self.is_running: break
                 
-                # UI Progress
-                if frame_num % 50 == 0:
+                # Progress update
+                if frame_num % 100 == 0:
                     current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
                     self.progress_signal.emit(current_percent)
 
@@ -3604,50 +3506,23 @@ class IndexerWorker(QThread):
                 if not ret: break
                 
                 current_time = frame_num / fps
-                curr_hist = self.calculate_histogram(frame)
-                sharpness = self.calculate_sharpness(frame)
-
-                # --- 1. DETECT SCENE CUTS ---
-                similarity = 1.0
-                if prev_hist is not None:
-                    similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
-                
-                # If similarity drops drastically, we entered a new "Scene" (Subject 2?)
-                if similarity < self.scene_threshold:
-                    # Save the previous scene's best frame if it was good
-                    if current_scene['best_frame'] is not None:
-                        detected_scenes.append(current_scene)
-                    # Reset tracker for new scene
-                    current_scene = {'best_frame': None, 'score': -1.0}
-
-                # --- 2. FIND BEST ACTION FRAME (With Blur Gate) ---
-                # We want: HIGH change (low similarity) AND HIGH sharpness
-                # If camera moves fast -> Sharpness drops -> Score drops -> Ignored.
-                if prev_hist is not None:
-                    motion_score = (1.0 - similarity) # 0.0 (still) to 1.0 (big move)
-                    
-                    # Logic: 
-                    # If image is blurry (<100), penalty is massive.
-                    # If image is sharp, we reward motion.
-                    if sharpness > self.blur_threshold:
-                        # Composite Score: Motion * Sharpness
-                        quality_score = motion_score * sharpness
-                        
-                        if quality_score > current_scene['score']:
-                            current_scene['score'] = quality_score
-                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            current_scene['best_frame'] = Image.fromarray(rgb)
-
-                # --- 3. INDEXING FOR TAGS (Standard) ---
                 time_since_last = current_time - last_indexed_time
                 should_index = False
                 
+                curr_hist = self.calculate_histogram(frame)
+                
+                # 1. Force Keyframe if max interval reached
                 if time_since_last >= self.max_interval:
                     should_index = True
+                
+                # 2. Scene Cut Detection
                 elif time_since_last >= self.min_interval:
-                     # Index if there's enough change, but not blurry garbage
-                     if similarity < 0.85 and sharpness > self.blur_threshold:
-                         should_index = True
+                    if prev_hist is not None:
+                        similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
+                        if similarity < self.scene_threshold:
+                            should_index = True
+                    else:
+                        should_index = True
 
                 if should_index:
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -3655,74 +3530,55 @@ class IndexerWorker(QThread):
                     
                     frames_batch.append(pil_img)
                     timestamps_batch.append(current_time)
+                    
+                    prev_hist = curr_hist
                     last_indexed_time = current_time
 
                     if len(frames_batch) >= self.batch_size:
-                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
+                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, tag_list, tag_scores)
                         frames_batch = []
                         timestamps_batch = []
-                        
-                prev_hist = curr_hist
 
-            # End of file: Save the last active scene
-            if current_scene['best_frame'] is not None:
-                detected_scenes.append(current_scene)
-
-            # Process remaining CLIP batch
+            # Process remaining
             if frames_batch:
-                self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
+                self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, tag_list, tag_scores)
             
             cap.release()
             
-            # --- PHASE 2: GENERATE MULTI-SCENE DESCRIPTION (BLIP-2) ---
-            descriptions = []
-            
-            # Limit to max 3 scenes per clip to prevent spamming
-            final_scenes = detected_scenes[:3]
-            if not final_scenes and total_frames > 0:
-                # Fallback: If no "Action" passed the blur gate, just grab the middle frame
-                # This happens for very still shots (interviews).
-                pass # We rely on CLIP tags in this case
-            
-            for i, scene in enumerate(final_scenes):
-                try:
-                    inputs = blip_processor(images=scene['best_frame'], return_tensors="pt").to(ai.device, dtype=ai.dtype)
-                    with torch.no_grad():
-                        out_ids = blip_model.generate(**inputs, max_new_tokens=40) # Short sentence
-                        desc = blip_processor.batch_decode(out_ids, skip_special_tokens=True)[0].strip()
-                        if desc:
-                            # Cleanup punctuation
-                            if desc.endswith('.'): desc = desc[:-1]
-                            descriptions.append(desc)
-                except Exception as e:
-                    print(f"BLIP Scene {i} Error: {e}")
-
-            # Join sentences: "A woman running. A man drinking coffee."
-            if descriptions:
-                # Dedup sentences (in case the scene split was redundant)
-                unique_desc = list(dict.fromkeys(descriptions))
-                full_description = ". ".join([d[0].upper() + d[1:] for d in unique_desc]) + "."
-            else:
-                full_description = "Static shot or unclear action."
-
-            # --- PHASE 3: FINALIZE TAGS (CLIP) ---
+            # --- FINAL TAG SELECTION ---
+            # Sort tags by their accumulated score (Highest confidence + frequency)
             sorted_tags = sorted(tag_scores.items(), key=lambda item: item[1], reverse=True)
-            final_tags = [tag for tag, score in sorted_tags[:25] if score > 0.05]
+            
+            # Filter: Take top 15 tags, but only if they have a decent score
+            final_tags = [tag for tag, score in sorted_tags[:15] if score > 0.5]
+            
+            # If the list is empty (dark video?), take at least top 3
             if not final_tags and sorted_tags:
-                final_tags = [t[0] for t in sorted_tags[:5]]
+                final_tags = [t[0] for t in sorted_tags[:3]]
 
-            # Merge with Transcript
+            # Generate Summary Text
+            if final_tags:
+                # First 5 tags are "Primary", rest are "Context"
+                primary = ", ".join(final_tags[:5])
+                base_summary = f"Visuals: {primary}"
+            else:
+                base_summary = "No clear visual subjects identified."
+
+            # Merge with Transcript if available
             current_meta = db.get_video_metadata(video_path)
             transcript_data = current_meta.get("transcript", [])
             
-            final_summary = full_description
             if transcript_data:
-                 full_text = " ".join([t['text'] for t in transcript_data])
-                 words = full_text.split()[:15]
-                 final_summary += f" | Audio: \"{' '.join(words)}...\""
+                # Use first 15 words of transcript
+                full_text = " ".join([t['text'] for t in transcript_data])
+                words = full_text.split()[:15]
+                text_preview = " ".join(words)
+                summary_text = f"{base_summary} | Audio: \"{text_preview}...\""
+            else:
+                summary_text = base_summary
 
-            db.save_tags(video_path, final_tags, final_summary)
-            self.summary_signal.emit(video_path, final_summary)
+            db.save_tags(video_path, final_tags, summary_text)
+            self.summary_signal.emit(video_path, summary_text)
         
         ai.unload_models()
         self.progress_signal.emit(100)
@@ -3735,21 +3591,35 @@ class IndexerWorker(QThread):
                 img_features = model.get_image_features(**inputs)
                 img_features /= img_features.norm(p=2, dim=-1, keepdim=True)
                 
+                # 1. Save Vector Embeddings (For "Find Similar" search)
                 vectors_list = img_features.cpu().numpy().tolist()
                 db.add_visual_embeddings(video_path, vectors_list, timestamps)
                 
+                # 2. Calculate Tag Probabilities (Dot Product)
+                # similarity shape: [batch_size, num_tags]
                 similarity = (100.0 * img_features @ ai.tag_embeddings.T).softmax(dim=-1)
-                values, indices = similarity.topk(15, dim=-1)
+                
+                # Get top 5 tags for EACH frame in the batch
+                # values: [batch_size, 5], indices: [batch_size, 5]
+                values, indices = similarity.topk(5, dim=-1)
                 
                 vals_np = values.cpu().numpy()
                 inds_np = indices.cpu().numpy()
                 
-                for i in range(len(images)):    
-                    for rank in range(15):
+                # 3. Accumulate Weighted Scores
+                for i in range(len(images)):
+                    for rank in range(5):
                         tag_idx = inds_np[i][rank]
-                        confidence = vals_np[i][rank]
+                        confidence = vals_np[i][rank] # 0.0 to 1.0 (after softmax)
                         tag_name = tag_list[tag_idx]
+                        
+                        # LOGIC: 
+                        # - We add the raw confidence to the global score.
+                        # - If "Dog" appears in 10 frames with 0.9 confidence, score = 9.0
+                        # - If "Cat" appears in 1 frame with 0.9 confidence, score = 0.9
+                        # - This naturally favors sustained objects but catches distinct high-confidence ones.
                         tag_scores[tag_name] += confidence
+
         except Exception as e:
             print(f"Batch Error: {e}")
 

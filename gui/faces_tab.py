@@ -1,4 +1,5 @@
 import os
+import json
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, QGridLayout, 
                              QFrame, QMessageBox, QInputDialog, QMenu, QApplication)
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -8,16 +9,16 @@ from core.face_db import FaceDB
 class FaceCard(QFrame):
     delete_requested = pyqtSignal(str) 
     rename_requested = pyqtSignal(str, str)
-    selection_changed = pyqtSignal(str, bool) # NEW: Signal for multi-select
+    selection_changed = pyqtSignal(str, bool) 
 
     def __init__(self, person_id, image, name="Unknown"):
         super().__init__()
         self.person_id = person_id
         self.current_name = name
-        self.is_selected = False # NEW: Track state
+        self.is_selected = False 
         
         self.setFixedSize(130, 160)
-        self.update_style() # NEW: centralized style
+        self.update_style() 
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 5)
@@ -40,7 +41,6 @@ class FaceCard(QFrame):
         layout.addWidget(self.name_lbl)
 
     def update_style(self):
-        # Visual feedback for selection
         if self.is_selected:
             self.setStyleSheet("""
                 FaceCard { background: #3A3445; border-radius: 8px; border: 2px solid #BEAEDB; }
@@ -53,16 +53,12 @@ class FaceCard(QFrame):
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
-            # Handle Multi-Select with CTRL
             modifiers = QApplication.keyboardModifiers()
             if modifiers == Qt.KeyboardModifier.ControlModifier:
                 self.is_selected = not self.is_selected
                 self.update_style()
                 self.selection_changed.emit(self.person_id, self.is_selected)
             else:
-                # If just clicking, rename (old behavior) or deselect others?
-                # For now, let's keep rename on simple click for speed, 
-                # but maybe double-click is better? Let's stick to simple click for rename for now.
                 new_name, ok = QInputDialog.getText(self, "Rename", f"Rename {self.current_name} to:")
                 if ok and new_name:
                     self.name_lbl.setText(new_name)
@@ -70,7 +66,6 @@ class FaceCard(QFrame):
                     self.rename_requested.emit(self.person_id, new_name)
 
     def contextMenuEvent(self, event):
-        # We handle the menu in the parent to support merging multiple cards
         event.ignore() 
 
 class FacesTab(QWidget):
@@ -78,7 +73,6 @@ class FacesTab(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         
-        # Header with instructions
         header_layout = QVBoxLayout()
         lbl_title = QLabel("DETECTED PEOPLE")
         lbl_title.setStyleSheet("color: #DDD; font-weight: 900; font-size: 14px;")
@@ -104,7 +98,7 @@ class FacesTab(QWidget):
         
         self.faces_count = 0
         self.cards = {} 
-        self.selected_ids = set() # Track multiple selections
+        self.selected_ids = set() 
         self.project_path = None
         self.face_db = None
 
@@ -114,7 +108,6 @@ class FacesTab(QWidget):
         self.load_existing_faces()
 
     def load_existing_faces(self):
-        # Clear existing
         for pid in list(self.cards.keys()):
             self.cards[pid].deleteLater()
         self.cards = {}
@@ -159,7 +152,6 @@ class FacesTab(QWidget):
             self.selected_ids.discard(pid)
 
     def contextMenuEvent(self, event):
-        # Global context menu for the grid
         menu = QMenu(self)
         menu.setStyleSheet("QMenu { background: #333; color: white; border: 1px solid #555; } QMenu::item:selected { background: #555; }")
         
@@ -181,37 +173,61 @@ class FacesTab(QWidget):
         primary_id = ids_to_merge[0] # The one we keep
         primary_name = self.face_db.get_name(primary_id)
         
-        # Ask for target name
         final_name, ok = QInputDialog.getText(self, "Merge Faces", 
             f"Merging {len(ids_to_merge)} entries.\nWhat is the real name?", text=primary_name)
         
         if not ok: return
 
-        # Perform Merge in Backend
-        # 1. Update Name of Primary
+        # 1. Update Name of Primary in FaceDB
         self.face_db.rename_person(primary_id, final_name)
         
-        # 2. For every other ID, we need to:
-        #    a. Remove it from FaceDB
-        #    b. Update known_encodings (actually, FaceDB needs a merge function, but for now we'll just delete the duplicates)
-        #    NOTE: Real merging is complex (averaging embeddings). 
-        #    For V2.0, we will just DELETE the duplicates and rename the Primary. 
-        #    The "knowledge" of the deleted faces is lost, but the user gets a clean list.
-        
-        #    BETTER APPROACH: Re-map the IDs in the FaceDB.
-        #    Since we don't have a deep merge function yet, we will just delete the others.
-        
+        # 2. VITAL FIX: Update Project Metadata (The JSON files)
+        # Scan all videos and replace the old IDs with the Primary ID
+        if self.project_path:
+            db_path = os.path.join(self.project_path, "_cyne_db", "metadata")
+            if os.path.exists(db_path):
+                ids_to_remove = set(ids_to_merge[1:])
+                
+                # Iterate over all metadata files
+                for filename in os.listdir(db_path):
+                    if not filename.endswith(".json"): continue
+                    
+                    meta_file = os.path.join(db_path, filename)
+                    try:
+                        with open(meta_file, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        if "faces" in data:
+                            faces = data["faces"]
+                            changed = False
+                            new_faces = []
+                            
+                            for fid in faces:
+                                if fid in ids_to_remove:
+                                    # Replace old ID with Primary ID
+                                    new_faces.append(primary_id)
+                                    changed = True
+                                else:
+                                    new_faces.append(fid)
+                            
+                            if changed:
+                                # Deduplicate (in case Primary ID was already there)
+                                data["faces"] = list(set(new_faces))
+                                with open(meta_file, 'w', encoding='utf-8') as f:
+                                    json.dump(data, f, indent=4)
+                    except Exception as e:
+                        print(f"Merge error on {filename}: {e}")
+
+        # 3. Remove Old IDs from FaceDB
         for pid in ids_to_merge[1:]:
             self.delete_face(pid, confirm=False)
             
-        # 3. Rename Primary in UI
+        # 4. Refresh UI
         self.handle_rename(primary_id, final_name)
-        
-        # Reset Selection
         self.selected_ids.clear()
         self.load_existing_faces() # Refresh grid to remove gaps
         
-        QMessageBox.information(self, "Merge Complete", f"Merged into '{final_name}'.\n(Note: You may need to re-scan to improve recognition for this person in future files.)")
+        QMessageBox.information(self, "Merge Complete", f"Merged into '{final_name}' and updated video references.")
 
     def handle_rename(self, person_id, new_name):
         if self.face_db:

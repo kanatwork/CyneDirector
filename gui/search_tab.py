@@ -11,6 +11,24 @@ from config import COLORS
 from core.search_engine import SearchEngine
 from gui.player_window import PlayerWindow
 
+# --- WORKER THREAD TO PREVENT FREEZING ---
+class SearchWorker(QThread):
+    results_ready = pyqtSignal(list)
+    error_occurred = pyqtSignal(str)
+
+    def __init__(self, engine, query):
+        super().__init__()
+        self.engine = engine
+        self.query = query
+
+    def run(self):
+        try:
+            # This calls the heavy search function (which might load AI models)
+            results = self.engine.search(self.query)
+            self.results_ready.emit(results)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
 # --- CUSTOM DRAGGABLE LIST (Unchanged) ---
 class DraggableListWidget(QListWidget):
     def __init__(self):
@@ -71,6 +89,7 @@ class SearchTab(QWidget):
         self.player_window = None
         self.engine = None
         self.thumb_loader = None
+        self.search_worker = None # Track the worker
         self.setup_ui()
 
     def setup_ui(self):
@@ -94,6 +113,7 @@ class SearchTab(QWidget):
                 background: #252526; border: 1px solid #444; color: white;
             }}
             QLineEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+            QLineEdit:disabled {{ background: #1a1a1a; color: #777; }}
         """)
         layout.addWidget(self.search_bar)
         
@@ -121,17 +141,28 @@ class SearchTab(QWidget):
         query = self.search_bar.text()
         if not query or not self.engine: return
         
+        # Stop existing loaders
         if self.thumb_loader and self.thumb_loader.isRunning():
             self.thumb_loader.stop()
             self.thumb_loader.wait()
 
         self.results_list.clear()
-        self.info_lbl.setText("Thinking...")
-        self.info_lbl.repaint()
         
-        # --- PERFORM SEARCH ---
-        results = self.engine.search(query)
-        self.info_lbl.setText(f"Found {len(results)} matches for '{query}' (Drag to Premiere to import)")
+        # Feedback state
+        self.info_lbl.setText(f"Searching for '{query}'... (This may take a moment)")
+        self.search_bar.setDisabled(True) # Lock input
+        self.search_bar.repaint()
+        
+        # --- START BACKGROUND WORKER ---
+        self.search_worker = SearchWorker(self.engine, query)
+        self.search_worker.results_ready.connect(self.on_search_finished)
+        self.search_worker.error_occurred.connect(self.on_search_error)
+        self.search_worker.start()
+
+    def on_search_finished(self, results):
+        self.search_bar.setDisabled(False)
+        self.search_bar.setFocus()
+        self.info_lbl.setText(f"Found {len(results)} matches for '{self.search_bar.text()}' (Drag to Premiere to import)")
         
         load_queue = []
         for res in results:
@@ -142,6 +173,11 @@ class SearchTab(QWidget):
         self.thumb_loader = ThumbnailLoader(load_queue)
         self.thumb_loader.thumb_ready.connect(self.update_thumbnail)
         self.thumb_loader.start()
+
+    def on_search_error(self, error_msg):
+        self.search_bar.setDisabled(False)
+        self.info_lbl.setText(f"Search Error: {error_msg}")
+        self.search_bar.setFocus()
 
     def add_result_item(self, res):
         item = QListWidgetItem(self.results_list)
@@ -183,7 +219,7 @@ class SearchTab(QWidget):
         lbl_ctx.setStyleSheet("color: #999; font-size: 11px;")
         meta_col.addWidget(lbl_ctx)
 
-        # C. Confidence Badge (NEW!)
+        # C. Confidence Badge
         score = res.get('score', 0)
         badge_color = "#444"
         if score > 80: badge_color = "#2E7D32" # Dark Green

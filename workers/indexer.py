@@ -1,4 +1,4 @@
-# [FILE: workers/indexer.py]
+import os
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
 import torch
@@ -25,8 +25,12 @@ class IndexerWorker(QThread):
         # --- Logic Settings ---
         self.scene_threshold = 0.60  # Sensitivity to scene changes (Lower = more sensitive)
         self.min_interval = 1.0      # Minimum time between scanning frames
-        self.max_interval = 15.0     # <--- FIXED: Restored missing attribute
-        self.blur_threshold = 100.0  # Frames below this score are considered "Motion Blurs" and ignored
+        self.max_interval = 15.0     # Max time before forcing a scan
+        
+        # --- FIX 1: LOWER BLUR THRESHOLD ---
+        # Was 100.0. Lowered to 50.0 to support cinematic/log footage 
+        # which often has lower variance/sharpness scores.
+        self.blur_threshold = 50.0  
 
     def calculate_histogram(self, image):
         """Creates a color fingerprint for the frame to detect cuts/motion."""
@@ -38,7 +42,7 @@ class IndexerWorker(QThread):
     def calculate_sharpness(self, image):
         """
         Returns a score representing how focused the image is.
-        Low score (<100) usually means fast camera movement (Blur).
+        Low score usually means fast camera movement (Blur).
         """
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         return cv2.Laplacian(gray, cv2.CV_64F).var()
@@ -65,7 +69,7 @@ class IndexerWorker(QThread):
         for idx, video_path in enumerate(self.file_paths):
             if not self.is_running: break
             
-            self.log_signal.emit(f"Deep Analysis: {video_path}")
+            self.log_signal.emit(f"Deep Analysis: {os.path.basename(video_path)}")
             
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened(): continue
@@ -124,12 +128,11 @@ class IndexerWorker(QThread):
 
                 # --- 2. FIND BEST ACTION FRAME (With Blur Gate) ---
                 # We want: HIGH change (low similarity) AND HIGH sharpness
-                # If camera moves fast -> Sharpness drops -> Score drops -> Ignored.
                 if prev_hist is not None:
                     motion_score = (1.0 - similarity) # 0.0 (still) to 1.0 (big move)
                     
                     # Logic: 
-                    # If image is blurry (<100), penalty is massive.
+                    # If image is blurry (< blur_threshold), penalty is massive.
                     # If image is sharp, we reward motion.
                     if sharpness > self.blur_threshold:
                         # Composite Score: Motion * Sharpness
@@ -149,7 +152,7 @@ class IndexerWorker(QThread):
                 elif time_since_last >= self.min_interval:
                      # Index if there's enough change, but not blurry garbage
                      if similarity < 0.85 and sharpness > self.blur_threshold:
-                         should_index = True
+                        should_index = True
 
                 if should_index:
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -174,18 +177,30 @@ class IndexerWorker(QThread):
             if frames_batch:
                 self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
             
-            cap.release()
-            
             # --- PHASE 2: GENERATE MULTI-SCENE DESCRIPTION (BLIP-2) ---
             descriptions = []
             
             # Limit to max 3 scenes per clip to prevent spamming
             final_scenes = detected_scenes[:3]
-            if not final_scenes and total_frames > 0:
-                # Fallback: If no "Action" passed the blur gate, just grab the middle frame
-                # This happens for very still shots (interviews).
-                pass # We rely on CLIP tags in this case
             
+            # --- FIX 2: FALLBACK MECHANISM ---
+            # If no frames passed the "Action/Sharpness" gate, force grab the middle frame.
+            if not final_scenes and total_frames > 0:
+                try:
+                    mid_frame = total_frames // 2
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame)
+                    ret, frame = cap.read()
+                    if ret:
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        # Create a "fake" scene with score 0 so BLIP processes it
+                        final_scenes.append({'best_frame': Image.fromarray(rgb), 'score': 0.0})
+                        self.log_signal.emit(f"   (Using fallback frame for {os.path.basename(video_path)})")
+                except Exception as e:
+                    print(f"Fallback frame grab failed: {e}")
+            # ---------------------------------
+            
+            cap.release()
+
             for i, scene in enumerate(final_scenes):
                 try:
                     inputs = blip_processor(images=scene['best_frame'], return_tensors="pt").to(ai.device, dtype=ai.dtype)
