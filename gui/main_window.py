@@ -1,3 +1,4 @@
+# [FILE: gui/main_window.py]
 import os
 import json
 import cv2 
@@ -319,32 +320,24 @@ class MainWindow(QMainWindow):
         except:
             self.preview_lbl.setText("Preview unavailable")
 
-        # 2. Load Metadata into Editor
-        json_path = f"{file_path}.json"
-        
+        # 2. Load Metadata into Editor (CORRECTED)
         tags = []
         summary = ""
         
-        if os.path.exists(json_path):
-            try:
-                # DATABASE READING IS SAFE NOW (Thread Locked)
-                data = self.db.get_video_metadata(file_path)
-                tags = data.get("tags", [])
-                
-                # Check summary logic
-                summary = data.get("summary", "")
-                
-                # If no summary but transcript exists, append a snippet
-                if not summary:
-                    trans_data = data.get("transcript", [])
-                    if isinstance(trans_data, list) and trans_data:
-                        preview_text = " ".join([seg['text'] for seg in trans_data[:10]])
-                        summary = f"(Auto-Transcript Snippet): {preview_text}..."
-                    elif isinstance(trans_data, str) and trans_data:
-                        summary = trans_data
-                        
-            except Exception as e:
-                print(f"Meta load error: {e}")
+        try:
+            data = self.db.get_video_metadata(file_path)
+            tags = data.get("tags", [])
+            
+            # Prioritize Summary > Transcript > Default
+            summary = data.get("summary", "")
+            
+            if not summary:
+                trans_data = data.get("transcript", [])
+                if isinstance(trans_data, list) and trans_data:
+                    preview_text = " ".join([seg['text'] for seg in trans_data[:10]])
+                    summary = f"(Auto-Transcript): {preview_text}..."
+        except Exception as e:
+            print(f"Meta load error: {e}")
             
         self.meta_panel.load_data(file_path, tags, summary)
 
@@ -544,7 +537,14 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(val)
         
     def update_visuals_status(self, path, summary_text):
+        # 1. Update the tree icon
         self.tree.mark_visuals_done(path, summary_text)
+        
+        # 2. LIVE REFRESH: If this file is currently open in the right panel, refresh it!
+        if self.current_preview_path:
+            # Normalize paths to ensure they match (Windows slash fix)
+            if os.path.normpath(path).lower() == os.path.normpath(self.current_preview_path).lower():
+                self.update_preview_panel()
 
     def update_audio_status(self, path):
         self.tree.mark_audio_done(path)
