@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import time
+import hashlib
 from pathlib import Path
 
 class Database:
@@ -18,14 +19,41 @@ class Database:
 
     def initialize(self, project_path):
         self.project_path = project_path
+        
+        # 1. Setup Main DB Folder
         db_path = os.path.join(project_path, "_cyne_db")
         os.makedirs(db_path, exist_ok=True)
         
-        # Use a persistent client
+        # 2. Setup Metadata Folder (The "Safe" Storage)
+        self.meta_dir = os.path.join(db_path, "metadata")
+        os.makedirs(self.meta_dir, exist_ok=True)
+        
+        # 3. Setup Vector DB
         self.client = chromadb.PersistentClient(path=db_path)
         self.visuals = self.client.get_or_create_collection(name="visual_embeddings", metadata={"hnsw:space": "cosine"})
         self.faces = self.client.get_or_create_collection(name="face_embeddings", metadata={"hnsw:space": "cosine"})
         self.transcripts = self.client.get_or_create_collection(name="transcripts", metadata={"hnsw:space": "cosine"})
+
+    def _get_meta_path(self, video_path):
+        """
+        Generates a unique, safe path for the metadata JSON inside _cyne_db.
+        Format: HASH_Filename.json
+        """
+        if not self.project_path:
+            raise ValueError("Database not initialized with project path")
+
+        # Normalize path to ensure consistency
+        norm_path = os.path.normpath(video_path).lower()
+        
+        # Create MD5 hash of the full path to prevent collisions
+        # (e.g. CameraA/C001.mp4 vs CameraB/C001.mp4)
+        path_hash = hashlib.md5(norm_path.encode('utf-8')).hexdigest()
+        
+        # Keep original filename for readability in debug
+        original_name = os.path.basename(video_path)
+        safe_name = f"{path_hash}_{original_name}.json"
+        
+        return os.path.join(self.meta_dir, safe_name)
 
     def add_visual_embeddings(self, video_path, vectors, timestamps):
         if not vectors: return
@@ -47,7 +75,7 @@ class Database:
             return {}
 
     def _save_metadata_atomic(self, meta_path, data):
-        data["last_scanned"] = str(os.path.getmtime(meta_path.replace(".json", "")))
+        data["last_scanned"] = str(time.time())
         
         with self._lock:
             temp_path = meta_path + ".tmp"
@@ -69,38 +97,38 @@ class Database:
             except Exception as e:
                 print(f"Save Error: {e}")
 
-    # Wrappers remain the same, they use the robust private methods above
+    # Wrappers now use _get_meta_path instead of pollution source folder
     def get_video_metadata(self, video_path):
-        meta_path = f"{video_path}.json"
+        meta_path = self._get_meta_path(video_path)
         return self._load_metadata(meta_path)
 
     def save_tags(self, video_path, tags, summary_text):
-        meta_path = f"{video_path}.json"
+        meta_path = self._get_meta_path(video_path)
         data = self._load_metadata(meta_path)
         data["tags"] = tags
         data["summary"] = summary_text
         self._save_metadata_atomic(meta_path, data)
 
     def save_transcript(self, video_path, transcript_list):
-        meta_path = f"{video_path}.json"
+        meta_path = self._get_meta_path(video_path)
         data = self._load_metadata(meta_path)
         data["transcript"] = transcript_list
         self._save_metadata_atomic(meta_path, data)
 
     def save_summary(self, video_path, summary_text):
-        meta_path = f"{video_path}.json"
+        meta_path = self._get_meta_path(video_path)
         data = self._load_metadata(meta_path)
         data["summary"] = summary_text
         self._save_metadata_atomic(meta_path, data)
 
     def update_metadata_key(self, video_path, key, value):
-        meta_path = f"{video_path}.json"
+        meta_path = self._get_meta_path(video_path)
         data = self._load_metadata(meta_path)
         data[key] = value
         self._save_metadata_atomic(meta_path, data)
 
     def clear_metadata_keys(self, video_path, keys_to_remove):
-        meta_path = f"{video_path}.json"
+        meta_path = self._get_meta_path(video_path)
         if not os.path.exists(meta_path): return
         data = self._load_metadata(meta_path)
         changed = False

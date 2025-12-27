@@ -74,7 +74,16 @@ class SearchEngine:
         
         target_person_ids = self.resolve_name_to_ids(full_query)
 
-        # --- 1. VECTOR SEARCH (Safely Check Model) ---
+        # --- 1. VECTOR SEARCH (FIX: Lazy Load Models) ---
+        # If the models aren't loaded yet (e.g. fresh app start), load them now.
+        if self.ai.clip_model is None or self.ai.clip_processor is None:
+            print("🔎 Search Engine: Lazy loading AI models for visual search...")
+            try:
+                self.ai.load_clip()
+            except Exception as e:
+                print(f"⚠️ Could not load AI model for search: {e}")
+
+        # Proceed if models are available (either pre-loaded or lazy-loaded)
         if self.ai.clip_model and self.ai.clip_processor:
             try:
                 inputs = self.ai.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.ai.device)
@@ -112,7 +121,7 @@ class SearchEngine:
             except Exception as e:
                 print(f"Vector search skip: {e}")
         else:
-            print("⚠️ Visual Search skipped (Models not loaded). Run 'Index Visuals' first to load them, or just search text.")
+            print("⚠️ Visual Search skipped (Models failed to load).")
 
         # --- 2. TEXT & METADATA SEARCH (Improved Matching) ---
         for video_path, data in self.cache.items():
@@ -140,7 +149,7 @@ class SearchEngine:
                         context = f"Featuring: {human_name}"
                         break
 
-            # C. Transcript (Tokenized) - Updated to support 'segments' or 'transcript' keys
+            # C. Transcript (Tokenized) - Support 'segments' or 'transcript' keys
             elif "segments" in data or "transcript" in data:
                 # Prefer 'segments', fallback to 'transcript'
                 trans_data = data.get("segments") or data.get("transcript")

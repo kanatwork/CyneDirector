@@ -191,11 +191,9 @@ FILE: main.py
 ==================================================
 import sys
 import os
-import ctypes  # <--- NEW: Required for Windows Taskbar Icon Fix
 import traceback
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtGui import QIcon  # <--- NEW: Required to load the icon
 
 # Import Config first
 import config
@@ -227,27 +225,16 @@ sys.excepthook = global_exception_handler
 
 # --- Main Entry Point ---
 def main():
-    # 1. WINDOWS TASKBAR FIX (The Professional Touch)
-    # This separates your app from the generic Python icon in the taskbar
-    if sys.platform == 'win32':
-        myappid = f'cynedirector.app.main.{config.VERSION}' # Arbitrary string
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-
-    # 2. Initialize App
+    # 1. Initialize App
     app = QApplication(sys.argv)
     app.setApplicationName(config.APP_NAME)
     app.setApplicationVersion(config.VERSION)
     
-    # --- SET APPLICATION ICON ---
-    # We look for icon.svg in the assets folder
-    icon_path = config.ASSETS_DIR / "icon.svg"
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
-    
-    # 3. Apply Global Styles
+    # 2. Apply Global Styles
     app.setStyleSheet(config.STYLESHEET)
     
-    # 4. Launch Project Dialog (The "Home Page")
+    # 3. Launch Project Dialog (The "Home Page")
+    # We import GUI classes here to keep launch fast
     try:
         from gui.project_dialog import ProjectDialog
     except ImportError:
@@ -255,38 +242,30 @@ def main():
         return
 
     welcome = ProjectDialog()
-    
-    # Ensure the dialog also gets the icon (sometimes dialogs miss the global setting)
-    if icon_path.exists():
-        welcome.setWindowIcon(QIcon(str(icon_path)))
-
     if welcome.exec(): 
-        # 5. If user created/opened a project, Launch Main Window
+        # 4. If user created/opened a project, Launch Main Window
         project_path = welcome.selected_project_path
         project_name = welcome.project_name
         
         print(f"Loading Project: {project_name} at {project_path}")
         
         # IMPORT MAIN WINDOW NOW (Lazy Loading)
+        # We assume gui/main_window.py exists. If not, we create a placeholder.
         try:
             from gui.main_window import MainWindow
             window = MainWindow(project_path, project_name)
-            
-            # Ensure Main Window gets the icon
-            if icon_path.exists():
-                window.setWindowIcon(QIcon(str(icon_path)))
-                
             window.show()
             sys.exit(app.exec())
             
         except ImportError as e:
-            # Fallback
+            # Fallback if main_window.py isn't created yet (for debugging)
             msg = QMessageBox()
             msg.setWindowTitle("Work In Progress")
             msg.setText(f"Project '{project_name}' Selected!\n\n(The Main Window file is missing: {e})\n\nCheck 'gui/main_window.py'")
             msg.exec()
             sys.exit()
     else:
+        # User closed the dialog without selecting a project
         sys.exit()
 
 if __name__ == "__main__":
