@@ -15,6 +15,7 @@ from gui.media_tree import MediaTree
 from gui.faces_tab import FacesTab
 from gui.search_tab import SearchTab
 from gui.player_window import PlayerWindow
+from gui.metadata_panel import MetadataPanel  # <--- NEW IMPORT
 from core.ai_models import AIBackend
 
 class MainWindow(QMainWindow):
@@ -251,14 +252,18 @@ class MainWindow(QMainWindow):
         self.preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_lbl.setStyleSheet("background: #000;")
         self.preview_lbl.setMinimumHeight(250)
+        
+        # Double click preview to open player
+        # Note: We need a custom event filter or subclass for click events on QLabel, 
+        # but for now we rely on the search tab for playback or add a 'Play' button overlay later.
+        
         pp_layout.addWidget(self.preview_lbl)
         
-        self.meta_box = QTextBrowser()
-        self.meta_box.setFrameShape(QFrame.Shape.NoFrame)
-        self.meta_box.setOpenLinks(False)
-        self.meta_box.anchorClicked.connect(self.handle_transcript_click)
-        self.meta_box.setStyleSheet(f"background: {COLORS['bg_panel']}; padding: 15px; color: {COLORS['text_dim']}; font-family: 'Segoe UI', sans-serif; font-size: 13px;")
-        pp_layout.addWidget(self.meta_box)
+        # --- NEW: METADATA PANEL REPLACES TEXT BROWSER ---
+        self.meta_panel = MetadataPanel()
+        self.meta_panel.save_requested.connect(self.save_metadata_handler)
+        pp_layout.addWidget(self.meta_panel)
+        # -------------------------------------------------
         
         splitter.addWidget(self.preview_panel)
         splitter.setSizes([900, 400])
@@ -288,13 +293,14 @@ class MainWindow(QMainWindow):
         paths = self.tree.get_selected_file_paths()
         if not paths: 
             self.preview_lbl.clear()
-            self.meta_box.clear()
+            self.meta_panel.clear()
             self.current_preview_path = None
             return
-            
+        
         file_path = paths[0]
         self.current_preview_path = file_path 
         
+        # 1. Load Thumbnail / Preview
         try:
             cap = cv2.VideoCapture(file_path)
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -317,51 +323,65 @@ class MainWindow(QMainWindow):
         except:
             self.preview_lbl.setText("Preview unavailable")
 
+        # 2. Load Metadata into Editor
         json_path = f"{file_path}.json"
-        html = f"<h3 style='color:{COLORS['accent']}'>{os.path.basename(file_path)}</h3>"
+        
+        tags = []
+        summary = ""
         
         if os.path.exists(json_path):
             try:
                 # DATABASE READING IS SAFE NOW (Thread Locked)
                 data = self.db.get_video_metadata(file_path)
-                
                 tags = data.get("tags", [])
-                if tags:
-                    html += f"<b>[ VISUALS ]</b><br><span style='color:#AAA'>{', '.join(tags)}</span><br><br>"
                 
-                transcript_data = data.get("transcript", "")
-                if isinstance(transcript_data, list):
-                    html += "<b>[ AUDIO TRANSCRIPT (Click to Play) ]</b><br>"
-                    for seg in transcript_data:
-                        start = seg['start']
-                        text = seg['text']
-                        html += f"<a href='{start}' style='color:{COLORS['accent']}; text-decoration:none;'><b>[{self.fmt_time(start)}]</b></a> {text} "
-                elif isinstance(transcript_data, str) and transcript_data:
-                    html += f"<b>[ TRANSCRIPT ]</b><br>{transcript_data}"
-                    
+                # Check summary logic
                 summary = data.get("summary", "")
-                if summary:
-                     html += f"<br><br><b>[ AI CONTEXT ]</b><br>{summary}"
+                
+                # If no summary but transcript exists, append a snippet
+                if not summary:
+                    trans_data = data.get("transcript", [])
+                    if isinstance(trans_data, list) and trans_data:
+                        preview_text = " ".join([seg['text'] for seg in trans_data[:10]])
+                        summary = f"(Auto-Transcript Snippet): {preview_text}..."
+                    elif isinstance(trans_data, str) and trans_data:
+                        summary = trans_data
+                        
             except Exception as e:
-                html += f"<br><i style='color:red'>Error: {e}</i>"
-        else:
-            html += "<i>Not indexed yet.</i>"
+                print(f"Meta load error: {e}")
             
-        self.meta_box.setHtml(html)
+        self.meta_panel.load_data(file_path, tags, summary)
 
+    def save_metadata_handler(self, new_tags, new_summary):
+        """ Handles the save event from the Metadata Panel """
+        if not self.current_preview_path: return
+        
+        try:
+            # 1. Update Database
+            self.db.save_tags(self.current_preview_path, new_tags, new_summary)
+            
+            # 2. Update UI Tree (Mark visual checkmark as done if tags exist)
+            if new_tags:
+                self.tree.mark_visuals_done(self.current_preview_path, new_summary)
+            
+            # 3. Re-index for Search
+            # This ensures the new tags are immediately searchable
+            self.search_tab.engine.build_index([self.current_preview_path])
+            
+            self.status_label.setText(f"Saved metadata for {os.path.basename(self.current_preview_path)}")
+            self.mark_dirty()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Could not save metadata: {e}")
+
+    # --- Standard Handlers (Keep unchanged) ---
     def fmt_time(self, seconds):
         m, s = divmod(seconds, 60)
         return f"{int(m):02}:{int(s):02}"
 
     def handle_transcript_click(self, url):
-        try:
-            timestamp = float(url.toString())
-            if self.current_preview_path:
-                if not self.player_window:
-                    self.player_window = PlayerWindow()
-                self.player_window.load_video(self.current_preview_path, timestamp)
-        except Exception as e:
-            print(f"Jump Error: {e}")
+        # Deprecated by new panel, but logic kept for reference if needed later
+        pass
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Video Files", "", "Video (*.mp4 *.mov *.mxf *.braw *.avi)")
@@ -390,7 +410,7 @@ class MainWindow(QMainWindow):
                 
         if valid_files:
             self.tree.add_files_flat(valid_files)
-            self.search_tab.engine.build_index(self.tree.get_all_file_paths()) # Update Search
+            self.search_tab.engine.build_index(self.tree.get_all_file_paths()) 
             self.mark_dirty()
         
         if folders:
@@ -421,7 +441,7 @@ class MainWindow(QMainWindow):
         if files:
             self.status_label.setText(f"Importing {len(files)} files into tree...")
             self.tree.add_files_flat(files) 
-            self.search_tab.engine.build_index(self.tree.get_all_file_paths()) # Update Search
+            self.search_tab.engine.build_index(self.tree.get_all_file_paths())
             self.mark_dirty()
             self.status_label.setText(f"Added {len(files)} files.")
         else:
@@ -513,6 +533,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
         self.search_tab.engine.build_index(self.tree.get_all_file_paths())
         self.worker = None
+        self.update_preview_panel() # Refresh to show new data
 
     def update_log_status(self, msg):
         self.status_label.setText(msg)
@@ -560,7 +581,6 @@ class MainWindow(QMainWindow):
 
     def run_indexing(self):
         if self.worker and self.worker.isRunning(): return
-        # NEW: Check for existing tags
         files = self.get_files_to_process(check_key='tags')
         if not files: return
         
@@ -575,7 +595,6 @@ class MainWindow(QMainWindow):
 
     def run_transcription(self):
         if self.worker and self.worker.isRunning(): return
-        # NEW: Check for existing transcripts
         files = self.get_files_to_process(check_key='transcript')
         if not files: return
         
@@ -590,7 +609,6 @@ class MainWindow(QMainWindow):
 
     def run_face_scan(self):
         if self.worker and self.worker.isRunning(): return
-        # NEW: Check for existing faces
         files = self.get_files_to_process(check_key='faces')
         if not files: return
         

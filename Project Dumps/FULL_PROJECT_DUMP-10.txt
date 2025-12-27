@@ -3,13 +3,6 @@
 
 
 ==================================================
-FILE: check_gpu.py
-==================================================
-import torch
-print(f"CUDA Available: {torch.cuda.is_available()}")
-print(f"Device Name: {torch.cuda.get_device_name(0)}")
-
-==================================================
 FILE: config.py
 ==================================================
 import os
@@ -491,7 +484,6 @@ import json
 import os
 import threading
 import time
-import hashlib
 from pathlib import Path
 
 class Database:
@@ -507,41 +499,14 @@ class Database:
 
     def initialize(self, project_path):
         self.project_path = project_path
-        
-        # 1. Setup Main DB Folder
         db_path = os.path.join(project_path, "_cyne_db")
         os.makedirs(db_path, exist_ok=True)
         
-        # 2. Setup Metadata Folder (The "Safe" Storage)
-        self.meta_dir = os.path.join(db_path, "metadata")
-        os.makedirs(self.meta_dir, exist_ok=True)
-        
-        # 3. Setup Vector DB
+        # Use a persistent client
         self.client = chromadb.PersistentClient(path=db_path)
         self.visuals = self.client.get_or_create_collection(name="visual_embeddings", metadata={"hnsw:space": "cosine"})
         self.faces = self.client.get_or_create_collection(name="face_embeddings", metadata={"hnsw:space": "cosine"})
         self.transcripts = self.client.get_or_create_collection(name="transcripts", metadata={"hnsw:space": "cosine"})
-
-    def _get_meta_path(self, video_path):
-        """
-        Generates a unique, safe path for the metadata JSON inside _cyne_db.
-        Format: HASH_Filename.json
-        """
-        if not self.project_path:
-            raise ValueError("Database not initialized with project path")
-
-        # Normalize path to ensure consistency
-        norm_path = os.path.normpath(video_path).lower()
-        
-        # Create MD5 hash of the full path to prevent collisions
-        # (e.g. CameraA/C001.mp4 vs CameraB/C001.mp4)
-        path_hash = hashlib.md5(norm_path.encode('utf-8')).hexdigest()
-        
-        # Keep original filename for readability in debug
-        original_name = os.path.basename(video_path)
-        safe_name = f"{path_hash}_{original_name}.json"
-        
-        return os.path.join(self.meta_dir, safe_name)
 
     def add_visual_embeddings(self, video_path, vectors, timestamps):
         if not vectors: return
@@ -563,7 +528,7 @@ class Database:
             return {}
 
     def _save_metadata_atomic(self, meta_path, data):
-        data["last_scanned"] = str(time.time())
+        data["last_scanned"] = str(os.path.getmtime(meta_path.replace(".json", "")))
         
         with self._lock:
             temp_path = meta_path + ".tmp"
@@ -585,38 +550,38 @@ class Database:
             except Exception as e:
                 print(f"Save Error: {e}")
 
-    # Wrappers now use _get_meta_path instead of pollution source folder
+    # Wrappers remain the same, they use the robust private methods above
     def get_video_metadata(self, video_path):
-        meta_path = self._get_meta_path(video_path)
+        meta_path = f"{video_path}.json"
         return self._load_metadata(meta_path)
 
     def save_tags(self, video_path, tags, summary_text):
-        meta_path = self._get_meta_path(video_path)
+        meta_path = f"{video_path}.json"
         data = self._load_metadata(meta_path)
         data["tags"] = tags
         data["summary"] = summary_text
         self._save_metadata_atomic(meta_path, data)
 
     def save_transcript(self, video_path, transcript_list):
-        meta_path = self._get_meta_path(video_path)
+        meta_path = f"{video_path}.json"
         data = self._load_metadata(meta_path)
         data["transcript"] = transcript_list
         self._save_metadata_atomic(meta_path, data)
 
     def save_summary(self, video_path, summary_text):
-        meta_path = self._get_meta_path(video_path)
+        meta_path = f"{video_path}.json"
         data = self._load_metadata(meta_path)
         data["summary"] = summary_text
         self._save_metadata_atomic(meta_path, data)
 
     def update_metadata_key(self, video_path, key, value):
-        meta_path = self._get_meta_path(video_path)
+        meta_path = f"{video_path}.json"
         data = self._load_metadata(meta_path)
         data[key] = value
         self._save_metadata_atomic(meta_path, data)
 
     def clear_metadata_keys(self, video_path, keys_to_remove):
-        meta_path = self._get_meta_path(video_path)
+        meta_path = f"{video_path}.json"
         if not os.path.exists(meta_path): return
         data = self._load_metadata(meta_path)
         changed = False
@@ -824,16 +789,7 @@ class SearchEngine:
         
         target_person_ids = self.resolve_name_to_ids(full_query)
 
-        # --- 1. VECTOR SEARCH (FIX: Lazy Load Models) ---
-        # If the models aren't loaded yet (e.g. fresh app start), load them now.
-        if self.ai.clip_model is None or self.ai.clip_processor is None:
-            print("🔎 Search Engine: Lazy loading AI models for visual search...")
-            try:
-                self.ai.load_clip()
-            except Exception as e:
-                print(f"⚠️ Could not load AI model for search: {e}")
-
-        # Proceed if models are available (either pre-loaded or lazy-loaded)
+        # --- 1. VECTOR SEARCH (Safely Check Model) ---
         if self.ai.clip_model and self.ai.clip_processor:
             try:
                 inputs = self.ai.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.ai.device)
@@ -871,7 +827,7 @@ class SearchEngine:
             except Exception as e:
                 print(f"Vector search skip: {e}")
         else:
-            print("⚠️ Visual Search skipped (Models failed to load).")
+            print("⚠️ Visual Search skipped (Models not loaded). Run 'Index Visuals' first to load them, or just search text.")
 
         # --- 2. TEXT & METADATA SEARCH (Improved Matching) ---
         for video_path, data in self.cache.items():
@@ -899,7 +855,7 @@ class SearchEngine:
                         context = f"Featuring: {human_name}"
                         break
 
-            # C. Transcript (Tokenized) - Support 'segments' or 'transcript' keys
+            # C. Transcript (Tokenized) - Updated to support 'segments' or 'transcript' keys
             elif "segments" in data or "transcript" in data:
                 # Prefer 'segments', fallback to 'transcript'
                 trans_data = data.get("segments") or data.get("transcript")
@@ -2099,8 +2055,7 @@ FILE: gui\player_window.py
 import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QHBoxLayout, 
                              QLabel, QSlider, QStyle, QFrame)
-from PyQt6.QtCore import Qt, QUrl
-from PyQt6.QtGui import QIcon, QAction
+from PyQt6.QtCore import Qt, QUrl, QTime
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
@@ -2108,7 +2063,7 @@ class PlayerWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CyneDirector Player")
-        self.resize(1000, 650)
+        self.resize(900, 600)
         self.setStyleSheet("background: #000; color: #FFF;")
         
         # --- Media Backend ---
@@ -2116,184 +2071,87 @@ class PlayerWindow(QWidget):
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
         
-        # --- Playback State ---
+        # State
         self.is_dragging_slider = False
-        self.playback_rate = 1.0
-        self.frame_duration = 40  # Default to ~25fps (40ms), updates on load
 
         # --- UI Setup ---
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # 1. Video Surface
+        # Video Surface
         self.video_widget = QVideoWidget()
         layout.addWidget(self.video_widget)
         self.media_player.setVideoOutput(self.video_widget)
         
-        # 2. Controls Container
+        # Controls Bar
         self.controls = QWidget()
-        self.controls.setFixedHeight(90)
+        self.controls.setFixedHeight(80)
         self.controls.setStyleSheet("background: #1E1E1E; border-top: 1px solid #333;")
         ctrl_layout = QVBoxLayout(self.controls)
-        ctrl_layout.setContentsMargins(15, 5, 15, 10)
+        ctrl_layout.setContentsMargins(10, 5, 10, 5)
         
-        # A. Timeline Slider
+        # Slider Row
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(0, 0)
         self.slider.sliderMoved.connect(self.set_position)
         self.slider.sliderPressed.connect(self.on_slider_pressed)
         self.slider.sliderReleased.connect(self.on_slider_released)
         self.slider.setStyleSheet("""
-            QSlider::groove:horizontal { height: 6px; background: #333; border-radius: 3px; }
-            QSlider::handle:horizontal { background: #00E676; width: 14px; margin: -5px 0; border-radius: 7px; }
-            QSlider::sub-page:horizontal { background: #00E676; border-radius: 3px; }
+            QSlider::groove:horizontal { height: 4px; background: #333; }
+            QSlider::handle:horizontal { background: #00E676; width: 12px; margin: -4px 0; border-radius: 6px; }
+            QSlider::sub-page:horizontal { background: #00E676; }
         """)
         ctrl_layout.addWidget(self.slider)
 
-        # B. Buttons Row
+        # Buttons Row
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(15)
-
-        # Play/Pause Button
+        
+        # Play/Pause
         self.btn_play = QPushButton()
         self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         self.btn_play.clicked.connect(self.toggle_play)
         self.btn_play.setFixedSize(40, 40)
-        self.btn_play.setStyleSheet("border: 1px solid #555; border-radius: 20px; background: #333;")
-        self.btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_play.setStyleSheet("border: 1px solid #444; border-radius: 20px; background: #252526;")
         btn_row.addWidget(self.btn_play)
         
         # Time Label
         self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_time.setStyleSheet("font-family: monospace; font-size: 13px; color: #CCC; font-weight: bold;")
+        self.lbl_time.setStyleSheet("font-family: monospace; font-size: 12px; color: #AAA; margin-left: 10px;")
         btn_row.addWidget(self.lbl_time)
         
-        # Speed Label (Feedback for JKL)
-        self.lbl_speed = QLabel("1x")
-        self.lbl_speed.setStyleSheet("color: #777; font-size: 11px; margin-left: 10px;")
-        btn_row.addWidget(self.lbl_speed)
-
         btn_row.addStretch()
-        
-        # Volume Slider
-        vol_icon = QLabel("🔊")
-        btn_row.addWidget(vol_icon)
-        
-        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
-        self.vol_slider.setRange(0, 100)
-        self.vol_slider.setValue(70)
-        self.vol_slider.setFixedWidth(100)
-        self.vol_slider.valueChanged.connect(self.audio_output.setVolume) # 0-1.0 float in Qt6, logic handled below
-        self.vol_slider.valueChanged.connect(self.set_volume)
-        self.vol_slider.setStyleSheet("""
-            QSlider::groove:horizontal { height: 4px; background: #444; }
-            QSlider::handle:horizontal { background: #FFF; width: 10px; margin: -3px 0; border-radius: 5px; }
-            QSlider::sub-page:horizontal { background: #AAA; }
-        """)
-        btn_row.addWidget(self.vol_slider)
-
         ctrl_layout.addLayout(btn_row)
         layout.addWidget(self.controls)
         
-        # --- Signals ---
+        # Signals
         self.media_player.positionChanged.connect(self.position_changed)
         self.media_player.durationChanged.connect(self.duration_changed)
-        self.media_player.errorOccurred.connect(self.handle_errors)
-        
-        # Initial Volume
-        self.set_volume(70)
-
-    # --- KEYBOARD CONTROLS (The "Pro" Features) ---
-    def keyPressEvent(self, event):
-        key = event.key()
-        
-        if key == Qt.Key.Key_Space:
-            self.toggle_play()
-            
-        elif key == Qt.Key.Key_K: # STOP/PAUSE
-            self.media_player.pause()
-            self.playback_rate = 0
-            self.update_speed_label()
-            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
-
-        elif key == Qt.Key.Key_L: # FORWARD (1x -> 2x -> 4x)
-            if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-                self.media_player.play()
-                self.playback_rate = 1.0
-            else:
-                if self.playback_rate < 1: self.playback_rate = 1.0
-                else: self.playback_rate = min(self.playback_rate * 2, 8.0)
-            
-            self.media_player.setPlaybackRate(self.playback_rate)
-            self.update_speed_label()
-            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-
-        elif key == Qt.Key.Key_J: # REVERSE (1x -> 2x -> 4x)
-            # NOTE: Reverse playback support depends on codec. 
-            # If standard backend fails, this might just pause or jump.
-            if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
-                self.media_player.play()
-                self.playback_rate = -1.0
-            else:
-                if self.playback_rate > -1: self.playback_rate = -1.0
-                else: self.playback_rate = max(self.playback_rate * 2, -8.0) # -2, -4...
-            
-            self.media_player.setPlaybackRate(self.playback_rate)
-            self.update_speed_label()
-            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-
-        elif key == Qt.Key.Key_Right: # FRAME STEP FORWARD
-            self.media_player.pause()
-            pos = self.media_player.position()
-            self.media_player.setPosition(pos + self.frame_duration)
-            
-        elif key == Qt.Key.Key_Left: # FRAME STEP BACK
-            self.media_player.pause()
-            pos = self.media_player.position()
-            self.media_player.setPosition(max(0, pos - self.frame_duration))
-
-    def update_speed_label(self):
-        rate = self.media_player.playbackRate()
-        self.lbl_speed.setText(f"{rate}x")
 
     def load_video(self, file_path, start_time_sec=0):
-        # Reset state
-        self.playback_rate = 1.0
-        self.media_player.setPlaybackRate(1.0)
-        self.update_speed_label()
-
-        source = QUrl.fromLocalFile(file_path)
-        self.media_player.setSource(source)
+        self.media_player.setSource(QUrl.fromLocalFile(file_path))
         self.media_player.play()
         self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
         
         if start_time_sec > 0:
             self.media_player.setPosition(int(start_time_sec * 1000))
-        
+            
         self.show()
         self.raise_()
-        self.activateWindow() # Force focus for keyboard events
 
     def toggle_play(self):
         if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.media_player.pause()
             self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
         else:
-            self.media_player.setPlaybackRate(1.0) # Reset speed on play
             self.media_player.play()
             self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
-            self.update_speed_label()
 
-    def set_volume(self, value):
-        # Qt6 AudioOutput takes float 0.0 - 1.0
-        self.audio_output.setVolume(value / 100.0)
-
-    # --- Slider & Time Logic ---
     def on_slider_pressed(self):
         self.is_dragging_slider = True
 
     def on_slider_released(self):
         self.is_dragging_slider = False
+        # Sync final position
         self.media_player.setPosition(self.slider.value())
 
     def position_changed(self, position):
@@ -2303,11 +2161,12 @@ class PlayerWindow(QWidget):
 
     def duration_changed(self, duration):
         self.slider.setRange(0, duration)
-        # Approximate frame duration (assuming 25fps if unknown)
-        self.frame_duration = 40 
 
     def set_position(self, position):
+        # Called while dragging
         self.update_time_label(position, self.media_player.duration())
+        # Optional: live seek (can be laggy)
+        # self.media_player.setPosition(position) 
 
     def update_time_label(self, current_ms, total_ms):
         def fmt(ms):
@@ -2316,14 +2175,8 @@ class PlayerWindow(QWidget):
             return f"{minutes:02}:{seconds:02}"
         self.lbl_time.setText(f"{fmt(current_ms)} / {fmt(total_ms)}")
 
-    def handle_errors(self):
-        self.btn_play.setEnabled(False)
-        self.lbl_time.setText("Error: Could not load media")
-        print(f"Player Error: {self.media_player.errorString()}")
-
     def closeEvent(self, event):
         self.media_player.stop()
-        self.media_player.setSource(QUrl()) # Release file lock
         event.accept()
 
 ==================================================
@@ -2778,21 +2631,19 @@ FILE: workers\face_scanner.py
 ==================================================
 import os
 import cv2
-import torch
+import face_recognition
 import numpy as np
-from PIL import Image
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QImage
 from core.face_db import FaceDB
 from core.database import Database
 from core.ai_models import AIBackend
 
-# Safe Import for Facenet
-try:
-    from facenet_pytorch import MTCNN, InceptionResnetV1
-    HAS_FACENET = True
-except ImportError:
-    HAS_FACENET = False
+def sanitize_image(image):
+    if image is None: return None
+    if not image.flags['C_CONTIGUOUS']:
+        image = np.ascontiguousarray(image)
+    return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 class FaceScannerWorker(QThread):
     log_signal = pyqtSignal(str)
@@ -2810,160 +2661,124 @@ class FaceScannerWorker(QThread):
         self.face_db = FaceDB(project_path)
         self.db = Database(project_path)
         
-        # Load known data
         self.known_encodings = self.face_db.known_encodings
         self.known_ids = self.face_db.known_ids
-
-        # Threshold for Cosine Similarity (0.6 is standard for Facenet)
-        self.match_threshold = 0.6
+        
+        # --- SMART MODEL SELECTION (Crash Fix) ---
+        # Default to CPU (Safe)
+        self.model_type = "hog" 
+        
+        # Only try CNN if we are sure dlib supports it
+        if AIBackend().device == "cuda":
+            try:
+                import dlib
+                if dlib.DLIB_USE_CUDA:
+                    self.model_type = "cnn"
+                    print("✅ CUDA Detected & Dlib supports it. Using CNN.")
+                else:
+                    print("⚠️ CUDA available but Dlib not compiled with it. Using HOG.")
+            except ImportError:
+                print("⚠️ Dlib not found directly. Using HOG.")
+                self.model_type = "hog"
 
     def run(self):
-        if not HAS_FACENET:
-            self.log_signal.emit("❌ CRITICAL: 'facenet-pytorch' missing.")
-            self.log_signal.emit("   ➜ Run: pip install facenet-pytorch")
-            self.finished_signal.emit()
-            return
-
-        # 1. SETUP AI MODELS
-        device = AIBackend().device
-        self.log_signal.emit(f"🚀 Loading Face Models on {device.upper()}...")
-
-        try:
-            # MTCNN for Detection (keep_all=True finds all faces)
-            mtcnn = MTCNN(keep_all=True, device=device, min_face_size=40)
-            
-            # InceptionResnetV1 for Embeddings (pretrained on vggface2)
-            resnet = InceptionResnetV1(pretrained='vggface2').eval().to(device)
-        except Exception as e:
-            self.log_signal.emit(f"Model Load Error: {e}")
-            self.finished_signal.emit()
-            return
-
-        # 2. PREPARE WORKLOAD
-        total_files = len(self.file_paths)
+        self.log_signal.emit(f"Loaded {len(self.known_ids)} known faces.")
+        self.log_signal.emit(f"Using Detection Model: {self.model_type.upper()}")
         
-        # Check for DB Version Mismatch (Dlib uses 128D, Facenet uses 512D)
-        if self.known_encodings:
-            if len(self.known_encodings[0]) == 128:
-                self.log_signal.emit("⚠️ Database mismatch (Dlib detected). Clearing old face DB...")
-                # In a production app, we might migrate. For now, we reset to prevent crashes.
-                self.known_encodings = []
-                self.known_ids = []
-                # (Optional: You could trigger self.face_db.clear() here)
+        file_steps = []
+        total_steps_global = 0
+        
+        for video_path in self.file_paths:
+            if not self.is_running: break
+            cap = cv2.VideoCapture(video_path)
+            if cap.isOpened():
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                step = int(fps * 0.8) if fps > 0 else 30 # Slightly slower scan for accuracy
+                if frames > 0:
+                    steps = frames // step
+                    file_steps.append((video_path, step, frames))
+                    total_steps_global += steps
+            cap.release()
+            
+        if total_steps_global == 0:
+            self.finished_signal.emit()
+            return
 
-        for idx, video_path in enumerate(self.file_paths):
+        current_step_global = 0
+        faces_dir = self.face_db.db_dir 
+
+        for (video_path, step, total_frames) in file_steps:
             if not self.is_running: break
             
-            filename = os.path.basename(video_path)
-            self.log_signal.emit(f"Scanning: {filename}")
-            
+            self.log_signal.emit(f"Scanning: {os.path.basename(video_path)}")
             cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened(): continue
-
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            unique_faces_in_file = set() 
             
-            # Optimization: Scan 1 frame every 1.5 seconds (Balance speed/accuracy)
-            step = int(fps * 1.5) if fps > 0 else 30
-            
-            unique_faces_in_file = set()
-            
-            for frame_num in range(0, total_frames, step):
+            for i in range(0, total_frames, step):
                 if not self.is_running: break
                 
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, i)
                 ret, frame = cap.read()
-                if not ret: break
-
-                # Convert to RGB (PIL) for Facenet
-                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                pil_img = Image.fromarray(img_rgb)
-
+                if not ret or frame is None: continue
+                
                 try:
-                    # A. DETECT FACES (Get bounding boxes)
-                    boxes, _ = mtcnn.detect(pil_img)
+                    h, w = frame.shape[:2]
+                    if w > 1080:
+                        scale = 1080 / w
+                        frame = cv2.resize(frame, (0,0), fx=scale, fy=scale)
                     
-                    if boxes is not None:
-                        # B. EXTRACT TENSORS (Pre-processed for Resnet)
-                        # mtcnn.extract returns a tensor of shape [N, 3, 160, 160]
-                        face_tensors = mtcnn.extract(pil_img, boxes, save_path=None)
+                    clean_image = sanitize_image(frame)
+
+                    # Use selected model type
+                    face_locations = face_recognition.face_locations(clean_image, model=self.model_type)
+                    
+                    if face_locations:
+                        face_encodings = face_recognition.face_encodings(clean_image, face_locations)
                         
-                        if face_tensors is not None:
-                            # C. GENERATE EMBEDDINGS (Batch process on GPU)
-                            face_tensors = face_tensors.to(device)
-                            with torch.no_grad():
-                                embeddings = resnet(face_tensors).detach().cpu().numpy()
-
-                            # D. COMPARE & IDENTIFY
-                            for i, embedding in enumerate(embeddings):
-                                box = boxes[i]
+                        for (top, right, bottom, left), encoding in zip(face_locations, face_encodings):
+                            matches = face_recognition.compare_faces(self.known_encodings, encoding, tolerance=0.55)
+                            person_id = None
+                            
+                            if True in matches:
+                                first_match_index = matches.index(True)
+                                person_id = self.known_ids[first_match_index]
+                            else:
+                                person_id = self.face_db.get_next_id()
+                                self.face_db.add_face(person_id, encoding)
+                                self.known_encodings = self.face_db.known_encodings
+                                self.known_ids = self.face_db.known_ids
+                    
+                                face_slice = clean_image[top:bottom, left:right]
+                                face_slice = np.ascontiguousarray(face_slice)
                                 
-                                # Find best match
-                                match_id = None
-                                min_dist = 100.0 # Arbitrary high start
+                                thumb_path = os.path.join(faces_dir, f"{person_id}.jpg")
+                                cv2.imwrite(thumb_path, cv2.cvtColor(face_slice, cv2.COLOR_RGB2BGR))
                                 
-                                if self.known_encodings:
-                                    # Calculate Euclidean distances to all known faces
-                                    # (Facenet embeddings are roughly normalized)
-                                    dists = np.linalg.norm(self.known_encodings - embedding, axis=1)
-                                    min_index = np.argmin(dists)
-                                    min_dist = dists[min_index]
-                                    
-                                    if min_dist < self.match_threshold:
-                                        match_id = self.known_ids[min_index]
-
-                                # Logic: New Person or Known?
-                                if match_id is None:
-                                    match_id = self.face_db.get_next_id()
-                                    self.face_db.add_face(match_id, embedding)
-                                    
-                                    # Update local cache
-                                    self.known_encodings.append(embedding)
-                                    self.known_ids.append(match_id)
-                                    
-                                    # Generate Thumbnail from Original Image (Not the whitened tensor)
-                                    x1, y1, x2, y2 = [int(b) for b in box]
-                                    # Clamp to image bounds
-                                    h_img, w_img = img_rgb.shape[:2]
-                                    x1, y1 = max(0, x1), max(0, y1)
-                                    x2, y2 = min(w_img, x2), min(h_img, y2)
-                                    
-                                    if x2 > x1 and y2 > y1:
-                                        face_crop = img_rgb[y1:y2, x1:x2]
-                                        face_crop = np.ascontiguousarray(face_crop)
-                                        
-                                        # Save thumbnail to disk
-                                        thumb_path = os.path.join(self.face_db.db_dir, f"{match_id}.jpg")
-                                        cv2.imwrite(thumb_path, cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR))
-                                        
-                                        # Send to UI
-                                        h_f, w_f, ch_f = face_crop.shape
-                                        bpl = ch_f * w_f
-                                        q_img = QImage(face_crop.data, w_f, h_f, bpl, QImage.Format.Format_RGB888).copy()
-                                        self.new_face_signal.emit(match_id, match_id, q_img)
-
-                                unique_faces_in_file.add(match_id)
+                                h_f, w_f, ch_f = face_slice.shape
+                                bytes_per_line = ch_f * w_f
+                                q_img = QImage(face_slice.data.tobytes(), w_f, h_f, bytes_per_line, QImage.Format.Format_RGB888).copy()
+                                
+                                self.new_face_signal.emit(person_id, person_id, q_img)
+                            
+                            unique_faces_in_file.add(person_id)
 
                 except Exception as e:
-                    pass # Skip frame on error
+                    pass 
 
-                # Progress Update
-                percent = int((frame_num / total_frames) * 100)
-                # (Optional: emit percent if you want granular progress)
-
+                current_step_global += 1
+                percent = int((current_step_global / total_steps_global) * 100)
+                self.progress_signal.emit(percent)
+            
             cap.release()
-
-            # Save results for this file
+            
             if unique_faces_in_file:
                 found_ids = list(unique_faces_in_file)
                 self.db.update_metadata_key(video_path, "faces", found_ids)
-                self.face_count_signal.emit(video_path, len(unique_faces_in_file))
-            
-            # Global Progress
-            global_prog = int(((idx + 1) / total_files) * 100)
-            self.progress_signal.emit(global_prog)
+                self.log_signal.emit(f"   Saved {len(found_ids)} faces to metadata.")
 
-        self.log_signal.emit("Face Scan Complete.")
+            self.face_count_signal.emit(video_path, len(unique_faces_in_file))
+            
         self.finished_signal.emit()
 
     def stop(self):
