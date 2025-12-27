@@ -20,10 +20,10 @@ class IndexerWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
-        self.batch_size = 64 # Smaller batch size for better VRAM management during heavy inference
+        self.batch_size = 64 
         
-        # --- Smart Indexing Settings ---
-        self.scene_threshold = 0.65  # Slightly more sensitive to cuts
+        # --- Smart Indexing Settings (RESTORED) ---
+        self.scene_threshold = 0.65  # Sensitivity to cuts
         self.min_interval = 1.0      # Min 1 sec between keyframes
         self.max_interval = 15.0     # Max 15 sec (catch slow pans)
 
@@ -36,13 +36,16 @@ class IndexerWorker(QThread):
 
     def run(self):
         self.progress_signal.emit(1)
-        self.log_signal.emit("Initializing AI Core (Smart Weighting Mode)...")
+        self.log_signal.emit("Initializing Dual-Core AI (Smart Scene + Captioning)...")
         
         ai = AIBackend()
         db = Database(self.project_path)
         
         try:
-            model, processor = ai.load_clip()
+            # 1. Load BOTH Models
+            # CLIP for fast scanning & tags, BLIP for the final sentence
+            clip_model, clip_processor = ai.load_clip()
+            blip_model, blip_processor = ai.load_blip()
         except Exception as e:
             self.log_signal.emit(f"AI Load Error: {e}")
             self.finished_signal.emit()
@@ -63,23 +66,25 @@ class IndexerWorker(QThread):
             if fps <= 0: fps = 24.0
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
+            # Identify the middle frame index (best candidate for a general summary)
+            midpoint_frame = total_frames // 2
+            best_thumbnail_for_blip = None
+            
             frames_batch = []
             timestamps_batch = []
             
-            # --- ACCUMULATOR FOR SMART TAGS ---
-            # Format: { 'TagString': accumulated_score }
+            # Accumulator for CLIP Tags
             tag_scores = defaultdict(float)
             
             prev_hist = None
             last_indexed_time = -self.max_interval
             
-            # Scan Step: Adaptive based on FPS (approx every 0.2s check)
+            # Scan Step
             scan_step = int(fps / 5) if fps > 20 else 2
             
             for frame_num in range(0, total_frames, scan_step):
                 if not self.is_running: break
                 
-                # Progress update
                 if frame_num % 100 == 0:
                     current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
                     self.progress_signal.emit(current_percent)
@@ -89,16 +94,21 @@ class IndexerWorker(QThread):
                 if not ret: break
                 
                 current_time = frame_num / fps
+                
+                # --- SNAPSHOT FOR BLIP ---
+                # If we are near the middle, grab this frame for the caption generator
+                if best_thumbnail_for_blip is None and frame_num >= midpoint_frame:
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    best_thumbnail_for_blip = Image.fromarray(rgb)
+
+                # --- SCENE DETECTION LOGIC ---
                 time_since_last = current_time - last_indexed_time
                 should_index = False
                 
                 curr_hist = self.calculate_histogram(frame)
                 
-                # 1. Force Keyframe if max interval reached
                 if time_since_last >= self.max_interval:
                     should_index = True
-                
-                # 2. Scene Cut Detection
                 elif time_since_last >= self.min_interval:
                     if prev_hist is not None:
                         similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
@@ -111,6 +121,10 @@ class IndexerWorker(QThread):
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     pil_img = Image.fromarray(img_rgb)
                     
+                    # If we missed the midpoint (short video), grab the first indexed frame
+                    if best_thumbnail_for_blip is None:
+                        best_thumbnail_for_blip = pil_img
+
                     frames_batch.append(pil_img)
                     timestamps_batch.append(current_time)
                     
@@ -118,89 +132,83 @@ class IndexerWorker(QThread):
                     last_indexed_time = current_time
 
                     if len(frames_batch) >= self.batch_size:
-                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, tag_list, tag_scores)
+                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
                         frames_batch = []
                         timestamps_batch = []
 
-            # Process remaining
+            # Process remaining CLIP batch
             if frames_batch:
-                self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, tag_list, tag_scores)
+                self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
             
             cap.release()
             
-            # --- FINAL TAG SELECTION ---
-            # Sort tags by their accumulated score (Highest confidence + frequency)
+            # --- PHASE 2: GENERATE SENTENCE (BLIP) ---
+            # We run this ONCE per video using the representative frame
+            description = "No description generated."
+            if best_thumbnail_for_blip:
+                try:
+                    inputs = blip_processor(images=best_thumbnail_for_blip, return_tensors="pt").to(ai.device)
+                    with torch.no_grad():
+                        out = blip_model.generate(**inputs, max_new_tokens=50)
+                        raw_desc = blip_processor.decode(out[0], skip_special_tokens=True)
+                        description = raw_desc[0].upper() + raw_desc[1:]
+                except Exception as e:
+                    print(f"BLIP Error: {e}")
+
+            # --- PHASE 3: FINALIZE TAGS (CLIP) ---
             sorted_tags = sorted(tag_scores.items(), key=lambda item: item[1], reverse=True)
             
-            # Filter: Take top 15 tags, but only if they have a decent score
+            # 5% Confidence Threshold (Optimized for Large Vocab)
             final_tags = [tag for tag, score in sorted_tags[:25] if score > 0.05]
-            
-            # If the list is empty (dark video?), take at least top 3
             if not final_tags and sorted_tags:
                 final_tags = [t[0] for t in sorted_tags[:5]]
 
-            # Generate Summary Text
-            if final_tags:
-                # First 5 tags are "Primary", rest are "Context"
-                primary = ", ".join(final_tags[:5])
-                base_summary = f"Visuals: {primary}"
-            else:
-                base_summary = "No clear visual subjects identified."
-
-            # Merge with Transcript if available
+            # Combine everything
+            # Summary = BLIP Sentence + Transcript (if any)
+            # Tags = CLIP Keywords
+            
+            # Check for transcript to append
             current_meta = db.get_video_metadata(video_path)
             transcript_data = current_meta.get("transcript", [])
             
+            final_summary = description
             if transcript_data:
-                # Use first 15 words of transcript
-                full_text = " ".join([t['text'] for t in transcript_data])
-                words = full_text.split()[:15]
-                text_preview = " ".join(words)
-                summary_text = f"{base_summary} | Audio: \"{text_preview}...\""
-            else:
-                summary_text = base_summary
+                 full_text = " ".join([t['text'] for t in transcript_data])
+                 words = full_text.split()[:15]
+                 final_summary += f" | Audio: \"{' '.join(words)}...\""
 
-            db.save_tags(video_path, final_tags, summary_text)
-            self.summary_signal.emit(video_path, summary_text)
+            # SAVE
+            db.save_tags(video_path, final_tags, final_summary)
+            self.summary_signal.emit(video_path, final_summary)
         
         ai.unload_models()
         self.progress_signal.emit(100)
         self.finished_signal.emit()
 
     def process_batch(self, images, timestamps, ai, db, video_path, model, processor, tag_list, tag_scores):
+        """Standard CLIP processing for Vectors and Tags"""
         try:
             inputs = processor(images=images, return_tensors="pt", padding=True).to(ai.device)
             with torch.no_grad():
                 img_features = model.get_image_features(**inputs)
                 img_features /= img_features.norm(p=2, dim=-1, keepdim=True)
                 
-                # 1. Save Vector Embeddings (For "Find Similar" search)
+                # 1. SAVE VECTORS (Crucial for Search Tab)
                 vectors_list = img_features.cpu().numpy().tolist()
                 db.add_visual_embeddings(video_path, vectors_list, timestamps)
                 
-                # 2. Calculate Tag Probabilities (Dot Product)
-                # similarity shape: [batch_size, num_tags]
+                # 2. ACCUMULATE TAGS
                 similarity = (100.0 * img_features @ ai.tag_embeddings.T).softmax(dim=-1)
-                
-                # Get top 5 tags for EACH frame in the batch
-                # values: [batch_size, 5], indices: [batch_size, 5]
                 values, indices = similarity.topk(15, dim=-1)
                 
                 vals_np = values.cpu().numpy()
                 inds_np = indices.cpu().numpy()
                 
-                # 3. Accumulate Weighted Scores
                 for i in range(len(images)):    
                     for rank in range(15):
                         tag_idx = inds_np[i][rank]
-                        confidence = vals_np[i][rank] # 0.0 to 1.0 (after softmax)
+                        confidence = vals_np[i][rank]
                         tag_name = tag_list[tag_idx]
-                        
-                        # LOGIC: 
-                        # - We add the raw confidence to the global score.
-                        # - If "Dog" appears in 10 frames with 0.9 confidence, score = 9.0
-                        # - If "Cat" appears in 1 frame with 0.9 confidence, score = 0.9
-                        # - This naturally favors sustained objects but catches distinct high-confidence ones.
                         tag_scores[tag_name] += confidence
 
         except Exception as e:
