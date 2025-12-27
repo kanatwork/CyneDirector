@@ -1,0 +1,12 @@
+CYNEDIRECTOR V20 CRASH REPORT
+==============================
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\main.py", line 81, in <module>
+    main()
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\main.py", line 64, in main
+    from gui.main_window import MainWindow
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 13, in <module>
+    from gui.media_tree import MediaTree
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\media_tree.py", line 165
+    except: pass
+SyntaxError: expected 'except' or 'finally' block

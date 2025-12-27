@@ -1,0 +1,13 @@
+CYNEDIRECTOR V20 CRASH REPORT
+==============================
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\face_scanner.py", line 76, in run
+    face_locations = face_recognition.face_locations(rgb_frame, model="hog")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\face_recognition\api.py", line 121, in face_locations
+    return [_trim_css_to_bounds(_rect_to_css(face), img.shape) for face in _raw_face_locations(img, number_of_times_to_upsample, model)]
+                                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\face_recognition\api.py", line 105, in _raw_face_locations
+    return face_detector(img, number_of_times_to_upsample)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Unsupported image type, must be 8bit gray or RGB image.

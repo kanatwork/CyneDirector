@@ -1,0 +1,24 @@
+CYNEDIRECTOR V20 CRASH REPORT
+==============================
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\indexer.py", line 28, in run
+    model, processor = ai.load_clip()
+                       ^^^^^^^^^^^^^^
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\core\ai_models.py", line 31, in load_clip
+    self.clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(self.device)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\transformers\modeling_utils.py", line 277, in _wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\transformers\modeling_utils.py", line 5048, in from_pretrained
+    ) = cls._load_pretrained_model(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\transformers\modeling_utils.py", line 5316, in _load_pretrained_model
+    load_state_dict(checkpoint_files[0], map_location="meta", weights_only=weights_only).keys()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\transformers\modeling_utils.py", line 508, in load_state_dict
+    check_torch_load_is_safe()
+  File "C:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\transformers\utils\import_utils.py", line 1647, in check_torch_load_is_safe
+    raise ValueError(
+ValueError: Due to a serious vulnerability issue in `torch.load`, even with `weights_only=True`, we now require users to upgrade torch to at least v2.6 in order to use the function. This version restriction does not apply when loading files with safetensors.
+See the vulnerability report here https://nvd.nist.gov/vuln/detail/CVE-2025-32434
