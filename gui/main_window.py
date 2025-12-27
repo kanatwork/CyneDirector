@@ -15,7 +15,8 @@ from gui.media_tree import MediaTree
 from gui.faces_tab import FacesTab
 from gui.search_tab import SearchTab
 from gui.player_window import PlayerWindow
-from gui.metadata_panel import MetadataPanel  # <--- NEW IMPORT
+# NEW IMPORT:
+from gui.metadata_panel import MetadataPanel 
 from core.ai_models import AIBackend
 
 class MainWindow(QMainWindow):
@@ -252,11 +253,6 @@ class MainWindow(QMainWindow):
         self.preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_lbl.setStyleSheet("background: #000;")
         self.preview_lbl.setMinimumHeight(250)
-        
-        # Double click preview to open player
-        # Note: We need a custom event filter or subclass for click events on QLabel, 
-        # but for now we rely on the search tab for playback or add a 'Play' button overlay later.
-        
         pp_layout.addWidget(self.preview_lbl)
         
         # --- NEW: METADATA PANEL REPLACES TEXT BROWSER ---
@@ -529,11 +525,16 @@ class MainWindow(QMainWindow):
     def worker_finished(self):
         self.lock_buttons(False)
         self.progress_bar.hide()
-        self.status_label.setText("Task Complete.")
+        
+        # FIX: Only say "Task Complete" if the last message wasn't an error
+        current_text = self.status_label.text()
+        if "CRITICAL" not in current_text and "Error" not in current_text:
+            self.status_label.setText("Task Complete.")
+            
         self.mark_dirty()
         self.search_tab.engine.build_index(self.tree.get_all_file_paths())
         self.worker = None
-        self.update_preview_panel() # Refresh to show new data
+        self.update_preview_panel()
 
     def update_log_status(self, msg):
         self.status_label.setText(msg)
