@@ -14,29 +14,33 @@ class AIBackend:
                 if cls._instance is None:
                     cls._instance = super(AIBackend, cls).__new__(cls)
                     
-                    # --- RTX 40/50 SERIES OPTIMIZATION ---
+                    # --- RTX 5070 OPTIMIZATION ---
                     if torch.cuda.is_available():
                         cls._instance.device = "cuda"
+                        # Use Float16 for massive speedup and VRAM savings
+                        cls._instance.dtype = torch.float16 
+                        
                         torch.backends.cudnn.benchmark = True 
                         torch.backends.cuda.matmul.allow_tf32 = True
                         torch.backends.cudnn.allow_tf32 = True
-                        print(f"🚀 AI ACCELERATION: ON ({torch.cuda.get_device_name(0)})")
+                        print(f"🚀 AI ACCELERATION: ON ({torch.cuda.get_device_name(0)}) | Precision: Float16")
                     else:
                         cls._instance.device = "cpu"
+                        cls._instance.dtype = torch.float32
                         print("⚠️ WARNING: RUNNING ON CPU.")
 
                     # Model Placeholders
                     cls._instance.clip_model = None
                     cls._instance.clip_processor = None
-                    cls._instance.blip_model = None       # <--- NEW: Captioning Model
-                    cls._instance.blip_processor = None   # <--- NEW: Captioning Processor
+                    cls._instance.blip_model = None
+                    cls._instance.blip_processor = None
                     cls._instance.whisper_model = None
                     cls._instance.tag_embeddings = None
                     cls._instance.load_lock = threading.Lock() 
             
         return cls._instance
 
-    # --- 1. CLIP (For Search & Keywords) ---
+    # --- 1. CLIP (Keywords) ---
     def load_clip(self):
         with self.load_lock:
             if self.clip_model: return self.clip_model, self.clip_processor
@@ -71,27 +75,32 @@ class AIBackend:
                 print(f"CLIP LOAD ERROR: {e}")
                 raise e
 
-    # --- 2. BLIP (For Contextual Sentences) ---
+    # --- 2. BLIP-2 (Action Description - THE UPGRADE) ---
     def load_blip(self):
         with self.load_lock:
             if self.blip_model: return self.blip_model, self.blip_processor
             
-            print(f"Loading BLIP (Captioning Engine) on {self.device}...")
+            print(f"Loading BLIP-2 (Advanced Captioning) on {self.device}...")
             try:
-                from transformers import BlipProcessor, BlipForConditionalGeneration
+                # We use Blip2Processor and Blip2ForConditionalGeneration
+                from transformers import Blip2Processor, Blip2ForConditionalGeneration
                 
-                # We use the 'Large' model for better sentence structure
-                model_name = "Salesforce/blip-image-captioning-large"
+                # "opt-2.7b" is the sweet spot. Much smarter than base BLIP, but fits on GPU.
+                model_name = "Salesforce/blip2-opt-2.7b"
                 
-                self.blip_processor = BlipProcessor.from_pretrained(model_name)
-                self.blip_model = BlipForConditionalGeneration.from_pretrained(model_name).to(self.device)
+                self.blip_processor = Blip2Processor.from_pretrained(model_name)
+                # Load in Float16 to save memory
+                self.blip_model = Blip2ForConditionalGeneration.from_pretrained(
+                    model_name, 
+                    torch_dtype=self.dtype
+                ).to(self.device)
                 
                 return self.blip_model, self.blip_processor
             except Exception as e:
-                print(f"BLIP LOAD ERROR: {e}")
+                print(f"BLIP-2 LOAD ERROR: {e}")
                 raise e
 
-    # --- 3. WHISPER (For Audio) ---
+    # --- 3. WHISPER (Audio) ---
     def load_whisper(self):
         with self.load_lock:
             if self.whisper_model: return self.whisper_model
