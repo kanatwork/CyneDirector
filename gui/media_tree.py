@@ -284,3 +284,19 @@ class MediaTree(QTreeWidget):
     
     def get_selected_file_paths(self):
         return [item.text(7) for item in self.selectedItems() if item.childCount() == 0]
+    
+    def get_checked_file_paths(self):
+        """Returns a list of file paths for all items that are currently CHECKED."""
+        paths = []
+        root = self.invisibleRootItem()
+        
+        def _recurse(p_item):
+            for i in range(p_item.childCount()):
+                it = p_item.child(i)
+                # If it's a file (no children) and is Checked
+                if it.childCount() == 0 and it.checkState(0) == Qt.CheckState.Checked:
+                    paths.append(it.text(7)) # Column 7 is hidden full path
+                _recurse(it)
+        
+        _recurse(root)
+        return paths

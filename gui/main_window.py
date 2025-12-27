@@ -556,9 +556,9 @@ class MainWindow(QMainWindow):
         self.faces_tab.add_face_card(pid, name, img)
 
     def get_files_to_process(self, check_key=None):
-        selected = self.tree.get_selected_file_paths()
+        selected = self.tree.get_checked_file_paths()
         if not selected:
-            QMessageBox.warning(self, "No Selection", "Please select specific files in the list to process.")
+            QMessageBox.warning(self, "No Selection", "Please verify that the checkboxes next to the files are ticked.")
             return []
         
         if check_key:
