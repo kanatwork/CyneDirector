@@ -16,7 +16,6 @@ from gui.media_tree import MediaTree
 from gui.faces_tab import FacesTab
 from gui.search_tab import SearchTab
 from gui.player_window import PlayerWindow
-# NEW IMPORT:
 from gui.metadata_panel import MetadataPanel 
 from core.ai_models import AIBackend
 
@@ -28,6 +27,10 @@ class MainWindow(QMainWindow):
         self.project_file = os.path.join(self.project_path, f"{self.project_name}{FILE_EXT}")
         self.is_dirty = False
         
+        # --- FIX: Initialize this variable explicitly to prevent crash ---
+        self.current_preview_path = None 
+        # ----------------------------------------------------------------
+
         self.setWindowTitle(f"{APP_NAME} - {project_name}")
         self.resize(1600, 950)
         
@@ -256,11 +259,9 @@ class MainWindow(QMainWindow):
         self.preview_lbl.setMinimumHeight(250)
         pp_layout.addWidget(self.preview_lbl)
         
-        # --- NEW: METADATA PANEL REPLACES TEXT BROWSER ---
         self.meta_panel = MetadataPanel()
         self.meta_panel.save_requested.connect(self.save_metadata_handler)
         pp_layout.addWidget(self.meta_panel)
-        # -------------------------------------------------
         
         splitter.addWidget(self.preview_panel)
         splitter.setSizes([900, 400])
@@ -320,15 +321,13 @@ class MainWindow(QMainWindow):
         except:
             self.preview_lbl.setText("Preview unavailable")
 
-        # 2. Load Metadata into Editor (CORRECTED)
+        # 2. Load Metadata into Editor
         tags = []
         summary = ""
         
         try:
             data = self.db.get_video_metadata(file_path)
             tags = data.get("tags", [])
-            
-            # Prioritize Summary > Transcript > Default
             summary = data.get("summary", "")
             
             if not summary:
@@ -342,34 +341,23 @@ class MainWindow(QMainWindow):
         self.meta_panel.load_data(file_path, tags, summary)
 
     def save_metadata_handler(self, new_tags, new_summary):
-        """ Handles the save event from the Metadata Panel """
         if not self.current_preview_path: return
-        
         try:
-            # 1. Update Database
             self.db.save_tags(self.current_preview_path, new_tags, new_summary)
-            
-            # 2. Update UI Tree (Mark visual checkmark as done if tags exist)
             if new_tags:
                 self.tree.mark_visuals_done(self.current_preview_path, new_summary)
-            
-            # 3. Re-index for Search
-            # This ensures the new tags are immediately searchable
             self.search_tab.engine.build_index([self.current_preview_path])
-            
             self.status_label.setText(f"Saved metadata for {os.path.basename(self.current_preview_path)}")
             self.mark_dirty()
-            
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Could not save metadata: {e}")
 
-    # --- Standard Handlers (Keep unchanged) ---
+    # --- Standard Handlers ---
     def fmt_time(self, seconds):
         m, s = divmod(seconds, 60)
         return f"{int(m):02}:{int(s):02}"
 
     def handle_transcript_click(self, url):
-        # Deprecated by new panel, but logic kept for reference if needed later
         pass
 
     def add_files(self):
@@ -518,12 +506,9 @@ class MainWindow(QMainWindow):
     def worker_finished(self):
         self.lock_buttons(False)
         self.progress_bar.hide()
-        
-        # FIX: Only say "Task Complete" if the last message wasn't an error
         current_text = self.status_label.text()
         if "CRITICAL" not in current_text and "Error" not in current_text:
             self.status_label.setText("Task Complete.")
-            
         self.mark_dirty()
         self.search_tab.engine.build_index(self.tree.get_all_file_paths())
         self.worker = None
@@ -537,11 +522,11 @@ class MainWindow(QMainWindow):
         self.progress_bar.setValue(val)
         
     def update_visuals_status(self, path, summary_text):
-        # 1. Update the tree icon
         self.tree.mark_visuals_done(path, summary_text)
         
-        # 2. LIVE REFRESH: If this file is currently open in the right panel, refresh it!
-        if self.current_preview_path:
+        # --- FIXED: CRASH PREVENTION ---
+        # Only try to update the preview panel if we have a valid selection path
+        if self.current_preview_path and path:
             # Normalize paths to ensure they match (Windows slash fix)
             if os.path.normpath(path).lower() == os.path.normpath(self.current_preview_path).lower():
                 self.update_preview_panel()
@@ -579,7 +564,6 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Already Done", f"All selected files have already been scanned for {check_key}.")
                 return []
             return filtered
-            
         return selected
 
     def run_indexing(self):

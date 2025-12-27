@@ -1,3 +1,4 @@
+# [FILE: workers/indexer.py]
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
 import torch
@@ -24,6 +25,7 @@ class IndexerWorker(QThread):
         # --- Logic Settings ---
         self.scene_threshold = 0.60  # Sensitivity to scene changes (Lower = more sensitive)
         self.min_interval = 1.0      # Minimum time between scanning frames
+        self.max_interval = 15.0     # <--- FIXED: Restored missing attribute
         self.blur_threshold = 100.0  # Frames below this score are considered "Motion Blurs" and ignored
 
     def calculate_histogram(self, image):
