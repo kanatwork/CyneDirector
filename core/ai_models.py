@@ -1,3 +1,4 @@
+# [FILE: core/ai_models.py]
 import torch
 import sys
 import os
@@ -14,20 +15,9 @@ class AIBackend:
                 if cls._instance is None:
                     cls._instance = super(AIBackend, cls).__new__(cls)
                     
-                    # --- RTX 5070 OPTIMIZATION ---
-                    if torch.cuda.is_available():
-                        cls._instance.device = "cuda"
-                        # Use Float16 for massive speedup and VRAM savings
-                        cls._instance.dtype = torch.float16 
-                        
-                        torch.backends.cudnn.benchmark = True 
-                        torch.backends.cuda.matmul.allow_tf32 = True
-                        torch.backends.cudnn.allow_tf32 = True
-                        print(f"🚀 AI ACCELERATION: ON ({torch.cuda.get_device_name(0)}) | Precision: Float16")
-                    else:
-                        cls._instance.device = "cpu"
-                        cls._instance.dtype = torch.float32
-                        print("⚠️ WARNING: RUNNING ON CPU.")
+                    # --- HARDWARE DETECTION & SAFETY ---
+                    # We probe the hardware to ensure stability before loading heavy models
+                    cls._instance.device, cls._instance.dtype = cls._instance._detect_hardware_capabilities()
 
                     # Model Placeholders
                     cls._instance.clip_model = None
@@ -36,9 +26,40 @@ class AIBackend:
                     cls._instance.blip_processor = None
                     cls._instance.whisper_model = None
                     cls._instance.tag_embeddings = None
+                    
+                    # Thread-safe loading lock
                     cls._instance.load_lock = threading.Lock() 
             
         return cls._instance
+
+    def _detect_hardware_capabilities(self):
+        """
+        Proactively tests if the GPU is usable. 
+        Returns: (device_str, torch_dtype)
+        """
+        if not torch.cuda.is_available():
+            print("⚠️ AI CORE: No CUDA detected. Running on CPU (Slow).")
+            return "cpu", torch.float32
+
+        try:
+            # 1. Test basic allocation
+            x = torch.tensor([1.0]).cuda()
+            # 2. Test a small matmul (catches some driver/kernel mismatches)
+            y = x @ x
+            
+            # 3. Apply Optimizations
+            torch.backends.cudnn.benchmark = True 
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            
+            device_name = torch.cuda.get_device_name(0)
+            print(f"🚀 AI ACCELERATION: ON ({device_name}) | Precision: Float16")
+            
+            return "cuda", torch.float16
+        except RuntimeError as e:
+            print(f"⚠️ GPU ERROR: CUDA available but failed stability test: {e}")
+            print(" ➜ Switching to CPU mode to prevent crash.")
+            return "cpu", torch.float32
 
     # --- 1. CLIP (Keywords) ---
     def load_clip(self):
@@ -54,7 +75,7 @@ class AIBackend:
                 self.clip_processor = CLIPProcessor.from_pretrained(model_name)
                 self.clip_model = CLIPModel.from_pretrained(model_name).to(self.device)
                 
-                # Pre-compute Tag Embeddings
+                # Pre-compute Tag Embeddings (Crucial for Search Speed)
                 print("Building Search Index...")
                 tags = get_tag_bank()
                 tag_embeddings_list = []
@@ -75,21 +96,19 @@ class AIBackend:
                 print(f"CLIP LOAD ERROR: {e}")
                 raise e
 
-    # --- 2. BLIP-2 (Action Description - THE UPGRADE) ---
+    # --- 2. BLIP-2 (Action Description) ---
     def load_blip(self):
         with self.load_lock:
             if self.blip_model: return self.blip_model, self.blip_processor
             
             print(f"Loading BLIP-2 (Advanced Captioning) on {self.device}...")
             try:
-                # We use Blip2Processor and Blip2ForConditionalGeneration
                 from transformers import Blip2Processor, Blip2ForConditionalGeneration
                 
-                # "opt-2.7b" is the sweet spot. Much smarter than base BLIP, but fits on GPU.
                 model_name = "Salesforce/blip2-opt-2.7b"
-                
                 self.blip_processor = Blip2Processor.from_pretrained(model_name)
-                # Load in Float16 to save memory
+                
+                # Load in Float16 to save memory if on GPU
                 self.blip_model = Blip2ForConditionalGeneration.from_pretrained(
                     model_name, 
                     torch_dtype=self.dtype
@@ -106,18 +125,34 @@ class AIBackend:
             if self.whisper_model: return self.whisper_model
             
             print(f"Loading Faster-Whisper on {self.device}...")
-            from faster_whisper import WhisperModel
-            
             try:
+                from faster_whisper import WhisperModel
+                
+                # Map torch device to faster_whisper string
                 device_str = "cuda" if self.device == "cuda" else "cpu"
-                compute_type = "float16" if self.device == "cuda" else "int8"
+                
+                # Determine compute type (float16 is faster on GPU, int8 safe for CPU)
+                if self.device == "cuda":
+                    compute_type = "float16"
+                else:
+                    compute_type = "int8"
+
                 self.whisper_model = WhisperModel("large-v3", device=device_str, compute_type=compute_type)
+            
             except Exception as e:
-                print(f"Whisper Load Error: {e}")
-                raise e
+                print(f"Whisper 'large-v3' Load Error: {e}.")
+                print("Falling back to 'medium' model on CPU (int8).")
+                try:
+                    from faster_whisper import WhisperModel
+                    self.whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
+                except Exception as e2:
+                    print(f"CRITICAL WHISPER FAILURE: {e2}")
+                    raise e2
+                    
             return self.whisper_model
 
     def unload_models(self):
+        """Frees VRAM by deleting models and clearing cache."""
         with self.load_lock:
             print("🧹 Unloading AI Models...")
             

@@ -1,4 +1,5 @@
 # [FILE: gui/metadata_panel.py]
+import os
 import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit, 
                              QTextEdit, QPushButton, QHBoxLayout, QMessageBox, QFrame)
@@ -12,8 +13,8 @@ class MetadataPanel(QWidget):
         super().__init__()
         self.setStyleSheet(f"background: {COLORS['bg_panel']};")
         self.is_editing = False # State tracker
-        self.setup_ui()
         self.current_file_path = None
+        self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -32,6 +33,7 @@ class MetadataPanel(QWidget):
         self.btn_edit.setFixedSize(60, 25)
         self.btn_edit.setCheckable(True)
         self.btn_edit.clicked.connect(self.toggle_edit_mode)
+        self.btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_edit.setStyleSheet(f"""
             QPushButton {{ background: transparent; border: 1px solid #555; color: #888; border-radius: 4px; font-size: 11px; font-weight: bold; }}
             QPushButton:checked {{ background: {COLORS['accent']}; color: black; border: none; }}
@@ -53,7 +55,7 @@ class MetadataPanel(QWidget):
         lbl_tags.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; margin-top: 5px;")
         layout.addWidget(lbl_tags)
 
-        self.input_tags = QTextEdit() # Changed to TextEdit for multi-line tags
+        self.input_tags = QTextEdit()
         self.input_tags.setPlaceholderText("AI generated keywords will appear here...")
         self.input_tags.setFixedHeight(80)
         self.input_tags.setStyleSheet(self._get_input_style(read_only=True))
@@ -123,12 +125,9 @@ class MetadataPanel(QWidget):
         else:
             self.btn_save.hide()
             self.btn_edit.setText("✎ Edit")
-            # Revert changes if cancelled? For now, we just hide button
-            if self.current_file_path:
-                # Reload data to revert any unsaved typing
-                # We need the main window to re-trigger load, or we store local cache.
-                # For simplicity in V2.1, we assume user saves or loses edits.
-                pass
+            # If cancelled, revert to original data? 
+            # Ideally yes, but we need to store it first.
+            # For now, simplistic approach (user must re-select to revert)
 
     def load_data(self, file_path, tags, summary):
         self.current_file_path = file_path
@@ -138,16 +137,17 @@ class MetadataPanel(QWidget):
             self.btn_edit.setChecked(False)
             self.toggle_edit_mode(False)
         
-        name = file_path.split("/")[-1]
-        if "\\" in name: name = name.split("\\")[-1]
-        self.lbl_filename.setText(name.upper())
+        if file_path:
+            self.lbl_filename.setText(os.path.basename(file_path).upper())
+            self.btn_edit.setEnabled(True)
+        else:
+            self.lbl_filename.setText("NO SELECTION")
+            self.btn_edit.setEnabled(False)
         
         # Format tags nicely
-        tag_str = ", ".join(tags) if tags else "No tags yet."
+        tag_str = ", ".join(tags) if tags else ""
         self.input_tags.setText(tag_str)
-        self.input_summary.setText(summary if summary else "No summary available.")
-        
-        self.btn_edit.setEnabled(True)
+        self.input_summary.setText(summary if summary else "")
 
     def clear(self):
         self.current_file_path = None
@@ -161,9 +161,11 @@ class MetadataPanel(QWidget):
     def handle_save(self):
         if not self.current_file_path: return
         
-        raw_tags = self.input_tags.toPlainText().split(',')
+        # Clean tags input (remove empty strings, extra spaces)
+        raw_tags = self.input_tags.toPlainText().replace('\n', ',').split(',')
         clean_tags = [t.strip() for t in raw_tags if t.strip()]
-        summary = self.input_summary.toPlainText()
+        
+        summary = self.input_summary.toPlainText().strip()
         
         self.save_requested.emit(clean_tags, summary)
         

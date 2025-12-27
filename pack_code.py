@@ -1,37 +1,75 @@
 import os
 
-# Files to ignore (saves space)
-IGNORE_DIRS = {'__pycache__', '_cyne_db', '.git', '.vscode', 'logs'}
-IGNORE_EXTS = {'.pyc', '.jpg', '.mp4', '.json', '.kan'}
+# --- CONFIGURATION ---
+OUTPUT_FILE = "FULL_PROJECT_DUMP.txt"
 
-def pack_project():
-    output_file = "FULL_PROJECT_DUMP.txt"
-    root_dir = os.getcwd()
+# Folders to completely ignore (Prevent massive files)
+IGNORE_DIRS = {
+    '__pycache__', '.git', '.idea', '.vscode', 'venv', 'env', 
+    'node_modules', '_cyne_db', 'videos', 'footage', 'output', 'cache'
+}
+
+# File extensions to text-read (Add more if needed)
+ALLOWED_EXTENSIONS = {
+    '.py', '.json', '.md', '.txt', '.css', '.qss', '.bat', '.sh', '.xml', '.yml', '.yaml'
+}
+
+# Specific files to ignore
+IGNORE_FILES = {
+    'pack_project.py', # Don't include this script itself
+    OUTPUT_FILE,       # Don't include the dump file
+    '.DS_Store',
+    'Thumbs.db'
+}
+
+def pack_code():
+    project_root = os.getcwd()
     
-    with open(output_file, "w", encoding="utf-8") as outfile:
+    print(f"📦 Packing project from: {project_root}")
+    print(f"🚫 Ignoring folders: {', '.join(IGNORE_DIRS)}")
+    
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as outfile:
+        # Header
         outfile.write("=== CYNEDIRECTOR CODEBASE DUMP ===\n\n")
         
-        for dirpath, dirnames, filenames in os.walk(root_dir):
-            # Skip ignored directories
-            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+        file_count = 0
+        
+        for root, dirs, files in os.walk(project_root):
+            # Modify dirs in-place to skip ignored directories
+            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
             
-            for filename in filenames:
-                if any(filename.endswith(ext) for ext in IGNORE_EXTS):
+            for file in files:
+                if file in IGNORE_FILES:
                     continue
-                    
-                filepath = os.path.join(dirpath, filename)
-                rel_path = os.path.relpath(filepath, root_dir)
                 
-                # Only grab .py files or requirements
-                if filename.endswith(".py") or filename == "requirements.txt":
-                    outfile.write(f"\n\n{'='*50}\nFILE: {rel_path}\n{'='*50}\n")
-                    try:
-                        with open(filepath, "r", encoding="utf-8") as infile:
-                            outfile.write(infile.read())
-                    except Exception as e:
-                        outfile.write(f"[Error reading file: {e}]")
+                # Check extension
+                _, ext = os.path.splitext(file)
+                if ext.lower() not in ALLOWED_EXTENSIONS:
+                    continue
+                
+                full_path = os.path.join(root, file)
+                rel_path = os.path.relpath(full_path, project_root)
+                
+                try:
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as infile:
+                        content = infile.read()
+                        
+                        # Formatting for the dump
+                        outfile.write("\n" + "="*50 + "\n")
+                        outfile.write(f"FILE: {rel_path}\n")
+                        outfile.write("="*50 + "\n")
+                        outfile.write(content + "\n")
+                        
+                        file_count += 1
+                        print(f"   ✅ Packed: {rel_path}")
+                        
+                except Exception as e:
+                    print(f"   ❌ Error reading {rel_path}: {e}")
 
-    print(f"Done! Upload '{output_file}' to the chat.")
+        outfile.write("\n=== END OF DUMP ===")
+        
+    print(f"\n🎉 Done! Packed {file_count} files into '{OUTPUT_FILE}'.")
+    print("You can now upload this file to the new chat.")
 
 if __name__ == "__main__":
-    pack_project()
+    pack_code()

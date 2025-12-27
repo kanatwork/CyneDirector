@@ -2,11 +2,10 @@
 import os
 import json
 import cv2 
-import datetime
 import sys
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QProgressBar, QSplitter, 
-                             QFileDialog, QMessageBox, QFrame, QTextBrowser, 
+                             QFileDialog, QMessageBox, QFrame, 
                              QProgressDialog, QStackedWidget, QButtonGroup)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QAction, QPixmap, QImage, QIcon
@@ -15,7 +14,6 @@ from config import APP_NAME, VERSION, COLORS, FILE_EXT
 from gui.media_tree import MediaTree
 from gui.faces_tab import FacesTab
 from gui.search_tab import SearchTab
-from gui.player_window import PlayerWindow
 from gui.metadata_panel import MetadataPanel 
 from core.ai_models import AIBackend
 
@@ -27,13 +25,16 @@ class MainWindow(QMainWindow):
         self.project_file = os.path.join(self.project_path, f"{self.project_name}{FILE_EXT}")
         self.is_dirty = False
         
-        # --- FIX: Initialize this variable explicitly to prevent crash ---
+        # State tracking
         self.current_preview_path = None 
-        # ----------------------------------------------------------------
+        self.worker = None
+        self.import_worker = None
+        self.player_window = None 
 
         self.setWindowTitle(f"{APP_NAME} - {project_name}")
         self.resize(1600, 950)
         
+        # Initialize Core Systems
         from core.database import Database
         self.db = Database()
         self.db.initialize(self.project_path)
@@ -41,16 +42,15 @@ class MainWindow(QMainWindow):
         from core.face_db import FaceDB
         FaceDB(self.project_path)
         
+        # Build UI
         self.setup_ui()
         self.create_menu_bar()
         
+        # Link Project Path to Tabs
         self.search_tab.set_project_path(self.project_path)
         self.faces_tab.set_project_path(self.project_path)
         
         self.load_project()
-        self.worker = None
-        self.player_window = None 
-        self.import_worker = None
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -287,6 +287,7 @@ class MainWindow(QMainWindow):
         act_save_as.triggered.connect(self.save_project_as)
         file_menu.addAction(act_save_as)
 
+    # --- CORE HANDLERS ---
     def update_preview_panel(self):
         paths = self.tree.get_selected_file_paths()
         if not paths: 
@@ -298,7 +299,7 @@ class MainWindow(QMainWindow):
         file_path = paths[0]
         self.current_preview_path = file_path 
         
-        # 1. Load Thumbnail / Preview
+        # 1. Load Thumbnail
         try:
             cap = cv2.VideoCapture(file_path)
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -321,10 +322,9 @@ class MainWindow(QMainWindow):
         except:
             self.preview_lbl.setText("Preview unavailable")
 
-        # 2. Load Metadata into Editor
+        # 2. Load Metadata
         tags = []
         summary = ""
-        
         try:
             data = self.db.get_video_metadata(file_path)
             tags = data.get("tags", [])
@@ -346,26 +346,24 @@ class MainWindow(QMainWindow):
             self.db.save_tags(self.current_preview_path, new_tags, new_summary)
             if new_tags:
                 self.tree.mark_visuals_done(self.current_preview_path, new_summary)
+            
+            # Efficient Update: Only update this file in the index
             self.search_tab.engine.build_index([self.current_preview_path])
+            
             self.status_label.setText(f"Saved metadata for {os.path.basename(self.current_preview_path)}")
             self.mark_dirty()
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Could not save metadata: {e}")
-
-    # --- Standard Handlers ---
-    def fmt_time(self, seconds):
-        m, s = divmod(seconds, 60)
-        return f"{int(m):02}:{int(s):02}"
-
-    def handle_transcript_click(self, url):
-        pass
 
     def add_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Select Video Files", "", "Video (*.mp4 *.mov *.mxf *.braw *.avi)")
         if files:
             self.status_label.setText(f"Adding {len(files)} files...")
             self.tree.add_files_flat(files)
-            self.search_tab.engine.build_index(self.tree.get_all_file_paths())
+            
+            # OPTIMIZATION: Only add NEW files to the search index
+            self.search_tab.engine.build_index(files)
+            
             self.mark_dirty() 
             self.status_label.setText(f"Added {len(files)} files.")
 
@@ -387,7 +385,8 @@ class MainWindow(QMainWindow):
                 
         if valid_files:
             self.tree.add_files_flat(valid_files)
-            self.search_tab.engine.build_index(self.tree.get_all_file_paths()) 
+            # OPTIMIZATION: Only add NEW files
+            self.search_tab.engine.build_index(valid_files) 
             self.mark_dirty()
         
         if folders:
@@ -418,7 +417,8 @@ class MainWindow(QMainWindow):
         if files:
             self.status_label.setText(f"Importing {len(files)} files into tree...")
             self.tree.add_files_flat(files) 
-            self.search_tab.engine.build_index(self.tree.get_all_file_paths())
+            # OPTIMIZATION: Add new files to search index
+            self.search_tab.engine.build_index(files)
             self.mark_dirty()
             self.status_label.setText(f"Added {len(files)} files.")
         else:
@@ -428,12 +428,7 @@ class MainWindow(QMainWindow):
         confirm = QMessageBox.question(self, "Confirm Clear", f"Are you sure you want to clear {data_type} data for {len(files)} files?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if confirm == QMessageBox.StandardButton.No: return
         
-        keys_map = {
-            'visuals': ['tags', 'summary'],
-            'audio': ['transcript', 'summary'],
-            'faces': ['faces']
-        }
-        
+        keys_map = {'visuals': ['tags', 'summary'], 'audio': ['transcript', 'summary'], 'faces': ['faces']}
         keys = keys_map.get(data_type, [])
         for fpath in files:
             self.db.clear_metadata_keys(fpath, keys)
@@ -477,11 +472,20 @@ class MainWindow(QMainWindow):
                     files = data.get("files", [])
                     if files: 
                         self.tree.add_files_flat(files)
+                        # Build index for loaded files
                         self.search_tab.engine.build_index(files)
             except: pass
 
     def closeEvent(self, event):
+        # 1. STOP WORKERS
+        if self.worker and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait()
+            
+        # 2. UNLOAD AI
         AIBackend().unload_models()
+        
+        # 3. SAVE CHECK
         if self.is_dirty:
             reply = QMessageBox.question(self, "Unsaved Changes", "Save before quitting?", QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
             if reply == QMessageBox.StandardButton.Save:
@@ -510,7 +514,12 @@ class MainWindow(QMainWindow):
         if "CRITICAL" not in current_text and "Error" not in current_text:
             self.status_label.setText("Task Complete.")
         self.mark_dirty()
-        self.search_tab.engine.build_index(self.tree.get_all_file_paths())
+        
+        # Update search index with any new metadata found
+        files_processed = self.get_files_to_process() # This is approximate, but safe
+        if files_processed:
+            self.search_tab.engine.build_index(files_processed)
+            
         self.worker = None
         self.update_preview_panel()
 
@@ -523,11 +532,7 @@ class MainWindow(QMainWindow):
         
     def update_visuals_status(self, path, summary_text):
         self.tree.mark_visuals_done(path, summary_text)
-        
-        # --- FIXED: CRASH PREVENTION ---
-        # Only try to update the preview panel if we have a valid selection path
         if self.current_preview_path and path:
-            # Normalize paths to ensure they match (Windows slash fix)
             if os.path.normpath(path).lower() == os.path.normpath(self.current_preview_path).lower():
                 self.update_preview_panel()
 
@@ -545,22 +550,21 @@ class MainWindow(QMainWindow):
     def get_files_to_process(self, check_key=None):
         selected = self.tree.get_checked_file_paths()
         if not selected:
-            QMessageBox.warning(self, "No Selection", "Please verify that the checkboxes next to the files are ticked.")
+            if check_key: # Only warn if we are actually trying to run a job
+                QMessageBox.warning(self, "No Selection", "Please verify that the checkboxes next to the files are ticked.")
             return []
         
         if check_key:
             filtered = []
             for path in selected:
                 meta = self.db.get_video_metadata(path)
+                # Skip files that already have this data key
                 if check_key == 'tags' and meta.get('tags'): continue
                 if check_key == 'transcript' and meta.get('transcript'): continue
                 if check_key == 'faces' and meta.get('faces'): continue
                 filtered.append(path)
             
-            if len(filtered) < len(selected):
-                print(f"Skipped {len(selected) - len(filtered)} already indexed files.")
-            
-            if not filtered:
+            if len(filtered) < len(selected) and not filtered:
                 QMessageBox.information(self, "Already Done", f"All selected files have already been scanned for {check_key}.")
                 return []
             return filtered

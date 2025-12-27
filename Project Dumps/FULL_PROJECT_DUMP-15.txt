@@ -1,0 +1,3847 @@
+=== CYNEDIRECTOR CODEBASE DUMP ===
+
+
+
+==================================================
+FILE: check_gpu.py
+==================================================
+import torch
+print(f"CUDA Available: {torch.cuda.is_available()}")
+print(f"Device Name: {torch.cuda.get_device_name(0)}")
+
+==================================================
+FILE: check_system.py
+==================================================
+import sys
+import os
+print("=== CYNEDIRECTOR DIAGNOSTIC ===")
+
+print("\n[1] CHECKING FACE LIBRARY...")
+try:
+    import facenet_pytorch
+    print("   ✅ facenet-pytorch is installed.")
+except ImportError:
+    print("   ❌ CRITICAL: 'facenet-pytorch' is MISSING.")
+    print("      Run: pip install facenet-pytorch")
+
+print("\n[2] CHECKING AI MODEL (CLIP)...")
+try:
+    import torch
+    from transformers import CLIPProcessor, CLIPModel
+    print(f"   ✅ Torch detected (CUDA: {torch.cuda.is_available()})")
+    print("   Loading CLIP model (Testing download)...")
+    model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14")
+    print("   ✅ CLIP Model loaded successfully!")
+except Exception as e:
+    print(f"   ❌ CLIP Failed: {e}")
+    print("      (This is why Visual Indexing is not working)")
+
+input("\nPress Enter to exit...")
+
+==================================================
+FILE: config.py
+==================================================
+import os
+from pathlib import Path
+
+# --- Application Info ---
+APP_NAME = "CyneDirector"
+VERSION = "2.0 (Redux)"
+FILE_EXT = ".kan"
+
+# --- Paths ---
+ROOT_DIR = Path(__file__).parent
+ASSETS_DIR = ROOT_DIR / "assets"
+LOG_DIR = ROOT_DIR / "logs"
+LOG_DIR.mkdir(exist_ok=True)
+ASSETS_DIR.mkdir(exist_ok=True)
+
+# --- THEME PALETTE (Cinema Dark - Wisteria Edition) ---
+COLORS = {
+    "bg_app": "#121212",        # Deepest background
+    "bg_panel": "#1E1F22",      # Sidebar / Panels
+    "bg_input": "#2B2D31",      # Input fields
+    "border": "#3F4148",        # Subtle borders
+    
+    "accent": "#BEAEDB",        # Wisteria (User Requested)
+    "accent_hover": "#A898C8",  # Slightly darker purple for hover
+    
+    "text_main": "#E0E0E0",
+    "text_dim": "#949BA4",
+    "selection": "#3A3445"      # Subtle purple tint for selections
+}
+
+STYLESHEET = f"""
+    /* GLOBAL RESET */
+    QWidget {{ 
+        background-color: {COLORS['bg_app']}; 
+        color: {COLORS['text_main']}; 
+        font-family: 'Segoe UI', 'Roboto', sans-serif;
+        font-size: 13px;
+    }}
+
+    /* SIDEBAR */
+    QWidget#Sidebar {{ 
+        background-color: {COLORS['bg_panel']}; 
+        border-right: 1px solid {COLORS['border']}; 
+    }}
+    
+    /* MODERN BUTTONS */
+    QPushButton {{ 
+        background-color: {COLORS['bg_input']}; 
+        border: 1px solid {COLORS['border']}; 
+        color: {COLORS['text_main']};
+        border-radius: 6px; 
+        padding: 8px 16px; 
+        font-weight: 600;
+    }}
+    QPushButton:hover {{ 
+        background-color: #35373C; 
+        border-color: {COLORS['text_dim']}; 
+    }}
+    QPushButton:pressed {{ background-color: {COLORS['bg_app']}; }}
+
+    /* ACCENT BUTTONS (Class-based styling) */
+    QPushButton[class="accent"] {{ 
+        background-color: {COLORS['accent']}; 
+        color: #000000; 
+        border: none;
+    }}
+    QPushButton[class="accent"]:hover {{ background-color: {COLORS['accent_hover']}; }}
+
+    /* INPUTS */
+    QLineEdit, QTextBrowser {{ 
+        background-color: {COLORS['bg_input']}; 
+        border: 1px solid {COLORS['border']}; 
+        border-radius: 4px; 
+        padding: 8px; 
+        color: white; 
+        selection-background-color: {COLORS['accent']};
+        selection-color: black;
+    }}
+    QLineEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+
+    /* TREE / LIST VIEWS */
+    QTreeWidget, QListWidget {{ 
+        background-color: {COLORS['bg_app']}; 
+        border: 1px solid {COLORS['border']}; 
+        border-radius: 6px;
+        outline: none;
+    }}
+    QHeaderView::section {{ 
+        background-color: {COLORS['bg_panel']}; 
+        padding: 6px; 
+        border: none; 
+        border-bottom: 1px solid {COLORS['border']}; 
+        font-weight: bold; 
+        color: {COLORS['text_dim']};
+    }}
+    QTreeWidget::item, QListWidget::item {{ padding: 6px; }}
+    QTreeWidget::item:selected, QListWidget::item:selected {{ 
+        background-color: {COLORS['selection']}; 
+        color: {COLORS['accent']};
+        border-left: 2px solid {COLORS['accent']};
+    }}
+
+    /* SCROLLBARS (Subtle) */
+    QScrollBar:vertical {{
+        background: {COLORS['bg_app']};
+        width: 10px;
+        margin: 0px;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {COLORS['border']};
+        min-height: 20px;
+        border-radius: 5px;
+    }}
+    QScrollBar::handle:vertical:hover {{ background: {COLORS['text_dim']}; }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+"""
+
+# Database Config
+DB_FOLDER_NAME = "_cyne_db"
+THUMBNAIL_SIZE = (320, 180)
+
+==================================================
+FILE: debug_ai.py
+==================================================
+import os
+import cv2
+import face_recognition
+import numpy as np
+import tempfile
+
+def test_ai_system():
+    print("--- CYNE DIAGNOSTIC TOOL ---")
+    
+    # TEST 1: Check Library Health with Synthetic Data
+    print("\n[TEST 1] Generating Synthetic Image (RAM Mode)...")
+    try:
+        # Create a pure black image with a white square (fake face)
+        # This guarantees PERFECT memory layout
+        img = np.zeros((500, 500, 3), dtype=np.uint8)
+        cv2.rectangle(img, (100, 100), (300, 300), (255, 255, 255), -1)
+        
+        print(f"   Image Shape: {img.shape}")
+        print(f"   Image Dtype: {img.dtype}")
+        
+        # Try detection
+        faces = face_recognition.face_locations(img, model="hog")
+        print(f"✅ TEST 1 PASSED! Detection successful. Found: {len(faces)} faces (Expected 0 or 1)")
+    except Exception as e:
+        print(f"❌ TEST 1 FAILED: {e}")
+        print("   CRITICAL: Your 'dlib' library is broken or incompatible.")
+        return
+
+    # TEST 2: Check File System & OneDrive Bypass
+    print("\n[TEST 2] Testing System Temp Folder (OneDrive Bypass)...")
+    try:
+        # Use Windows %TEMP% folder (OneDrive cannot touch this)
+        fd, temp_path = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        
+        # Write image
+        cv2.imwrite(temp_path, img)
+        print(f"   Saved temp file to: {temp_path}")
+        
+        # Read back
+        loaded_img = face_recognition.load_image_file(temp_path)
+        print(f"   Loaded Shape: {loaded_img.shape}")
+        
+        # Detect
+        faces = face_recognition.face_locations(loaded_img, model="hog")
+        print(f"✅ TEST 2 PASSED! Disk buffer works.")
+        
+        os.remove(temp_path)
+    except Exception as e:
+        print(f"❌ TEST 2 FAILED: {e}")
+        print("   CRITICAL: Cannot write/read from System Temp folder.")
+
+    print("\n--- DIAGNOSTIC COMPLETE ---")
+
+if __name__ == "__main__":
+    test_ai_system()
+
+==================================================
+FILE: fetch_vocab.py
+==================================================
+# FILE: fetch_vocab_pro.py
+import requests
+import re
+
+# 1. ImageNet-21k (The "Everything" List - ~21,000 tags)
+# Source: Google Research Big Transfer (BiT) official repository
+URL_IMAGENET = "https://storage.googleapis.com/bit_models/imagenet21k_wordnet_lemmas.txt"
+
+# 2. Places365 (The "Environments" List - 365 tags)
+# Source: MIT CSAIL Vision official repository
+URL_PLACES = "https://raw.githubusercontent.com/CSAILVision/places365/master/categories_places365.txt"
+
+def fetch_master_list():
+    print("🚀 CONTACTING DATABASES...")
+    
+    full_vocab = set()
+
+    # --- FETCH IMAGENET-21K ---
+    try:
+        print(f"   ⬇️  Downloading ImageNet-21k (21,000+ concepts)...")
+        resp = requests.get(URL_IMAGENET)
+        if resp.status_code == 200:
+            lines = resp.text.split('\n')
+            for line in lines:
+                # ImageNet formatting is sometimes "noun, synonym". We just want the first one.
+                # Example: "espresso_maker, espresso_machine" -> "Espresso maker"
+                clean = line.split(',')[0].replace('_', ' ').strip()
+                if len(clean) > 2:
+                    full_vocab.add(clean.title())
+        else:
+            print("   ❌ Error reaching ImageNet server.")
+    except Exception as e:
+        print(f"   ❌ ImageNet failed: {e}")
+
+    # --- FETCH PLACES365 ---
+    try:
+        print(f"   ⬇️  Downloading Places365 (Environments)...")
+        resp = requests.get(URL_PLACES)
+        if resp.status_code == 200:
+            lines = resp.text.split('\n')
+            for line in lines:
+                # Format: "/a/airfield" -> "Airfield"
+                parts = line.split(' ')
+                if parts:
+                    clean = parts[0].split('/')[-1].replace('_', ' ').strip()
+                    if len(clean) > 2:
+                        full_vocab.add(clean.title())
+        else:
+            print("   ❌ Error reaching MIT server.")
+    except Exception as e:
+        print(f"   ❌ Places365 failed: {e}")
+
+    # --- SAVE TO DISK ---
+    final_list = sorted(list(full_vocab))
+    
+    with open("vocabulary.txt", "w", encoding="utf-8") as f:
+        for word in final_list:
+            f.write(word + "\n")
+
+    print(f"\n✅ SUCCESS! Master vocabulary built.")
+    print(f"   📚 Total unique tags: {len(final_list)}")
+    print(f"   📂 Saved to: {os.path.abspath('vocabulary.txt')}")
+    print("   (Restart CyneDirector to load this new brain)")
+
+if __name__ == "__main__":
+    import os
+    fetch_master_list()
+
+==================================================
+FILE: main.py
+==================================================
+import sys
+import os
+import ctypes  # <--- NEW: Required for Windows Taskbar Icon Fix
+import traceback
+from datetime import datetime
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtGui import QIcon  # <--- NEW: Required to load the icon
+
+# Import Config first
+import config
+
+# --- Crash Handler ---
+def global_exception_handler(exctype, value, tb):
+    """Captures crashes and saves them to a log file instead of just closing"""
+    if exctype == KeyboardInterrupt:
+        sys.__excepthook__(exctype, value, tb)
+        return
+    
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_path = config.LOG_DIR / f"crash_{timestamp}.txt"
+    
+    error_msg = "".join(traceback.format_exception(exctype, value, tb))
+    
+    with open(log_path, "w") as f:
+        f.write(f"CYNEDIRECTOR V20 CRASH REPORT\n{'='*30}\n")
+        f.write(error_msg)
+        
+    print(f"CRITICAL ERROR: {value}")
+    print(f"Report saved to: {log_path}")
+    
+    # Try to show a popup if QApplication is alive
+    if QApplication.instance():
+        QMessageBox.critical(None, "Critical Error", f"An error occurred.\nLog saved to: {log_path}\n\nError: {value}")
+
+sys.excepthook = global_exception_handler
+
+# --- Main Entry Point ---
+def main():
+    # 1. WINDOWS TASKBAR FIX (The Professional Touch)
+    # This separates your app from the generic Python icon in the taskbar
+    if sys.platform == 'win32':
+        myappid = f'cynedirector.app.main.{config.VERSION}' # Arbitrary string
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
+    # 2. Initialize App
+    app = QApplication(sys.argv)
+    app.setApplicationName(config.APP_NAME)
+    app.setApplicationVersion(config.VERSION)
+    
+    # --- SET APPLICATION ICON ---
+    # We look for icon.svg in the assets folder
+    icon_path = config.ASSETS_DIR / "icon.svg"
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
+    
+    # 3. Apply Global Styles
+    app.setStyleSheet(config.STYLESHEET)
+    
+    # 4. Launch Project Dialog (The "Home Page")
+    try:
+        from gui.project_dialog import ProjectDialog
+    except ImportError:
+        QMessageBox.critical(None, "Setup Error", "Could not find 'gui/project_dialog.py'.\nMake sure the 'gui' folder exists.")
+        return
+
+    welcome = ProjectDialog()
+    
+    # Ensure the dialog also gets the icon (sometimes dialogs miss the global setting)
+    if icon_path.exists():
+        welcome.setWindowIcon(QIcon(str(icon_path)))
+
+    if welcome.exec(): 
+        # 5. If user created/opened a project, Launch Main Window
+        project_path = welcome.selected_project_path
+        project_name = welcome.project_name
+        
+        print(f"Loading Project: {project_name} at {project_path}")
+        
+        # IMPORT MAIN WINDOW NOW (Lazy Loading)
+        try:
+            from gui.main_window import MainWindow
+            window = MainWindow(project_path, project_name)
+            
+            # Ensure Main Window gets the icon
+            if icon_path.exists():
+                window.setWindowIcon(QIcon(str(icon_path)))
+                
+            window.show()
+            sys.exit(app.exec())
+            
+        except ImportError as e:
+            # Fallback
+            msg = QMessageBox()
+            msg.setWindowTitle("Work In Progress")
+            msg.setText(f"Project '{project_name}' Selected!\n\n(The Main Window file is missing: {e})\n\nCheck 'gui/main_window.py'")
+            msg.exec()
+            sys.exit()
+    else:
+        sys.exit()
+
+if __name__ == "__main__":
+    main()
+
+==================================================
+FILE: pack_code.py
+==================================================
+import os
+
+# Files to ignore (saves space)
+IGNORE_DIRS = {'__pycache__', '_cyne_db', '.git', '.vscode', 'logs'}
+IGNORE_EXTS = {'.pyc', '.jpg', '.mp4', '.json', '.kan'}
+
+def pack_project():
+    output_file = "FULL_PROJECT_DUMP.txt"
+    root_dir = os.getcwd()
+    
+    with open(output_file, "w", encoding="utf-8") as outfile:
+        outfile.write("=== CYNEDIRECTOR CODEBASE DUMP ===\n\n")
+        
+        for dirpath, dirnames, filenames in os.walk(root_dir):
+            # Skip ignored directories
+            dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+            
+            for filename in filenames:
+                if any(filename.endswith(ext) for ext in IGNORE_EXTS):
+                    continue
+                    
+                filepath = os.path.join(dirpath, filename)
+                rel_path = os.path.relpath(filepath, root_dir)
+                
+                # Only grab .py files or requirements
+                if filename.endswith(".py") or filename == "requirements.txt":
+                    outfile.write(f"\n\n{'='*50}\nFILE: {rel_path}\n{'='*50}\n")
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as infile:
+                            outfile.write(infile.read())
+                    except Exception as e:
+                        outfile.write(f"[Error reading file: {e}]")
+
+    print(f"Done! Upload '{output_file}' to the chat.")
+
+if __name__ == "__main__":
+    pack_project()
+
+==================================================
+FILE: requirements.txt
+==================================================
+PyQt6>=6.6.0
+numpy<2.0.0
+opencv-python>=4.8.0
+pillow>=10.4.0
+# CRITICAL SECURITY UPDATE: Enforce Torch 2.6+
+torch>=2.6.0
+transformers>=4.35.0
+# CHANGED: Replaced openai-whisper with faster-whisper to match code usage
+faster-whisper>=1.0.0
+chromadb>=0.4.18
+face_recognition>=1.3.0
+matplotlib>=3.8.0
+scipy>=1.11.0
+
+==================================================
+FILE: core\ai_models.py
+==================================================
+import torch
+import sys
+import os
+import gc
+import threading
+
+class AIBackend:
+    _instance = None
+    _lock = threading.Lock() 
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock: 
+                if cls._instance is None:
+                    cls._instance = super(AIBackend, cls).__new__(cls)
+                    
+                    # --- RTX 5070 OPTIMIZATION ---
+                    if torch.cuda.is_available():
+                        cls._instance.device = "cuda"
+                        # Use Float16 for massive speedup and VRAM savings
+                        cls._instance.dtype = torch.float16 
+                        
+                        torch.backends.cudnn.benchmark = True 
+                        torch.backends.cuda.matmul.allow_tf32 = True
+                        torch.backends.cudnn.allow_tf32 = True
+                        print(f"🚀 AI ACCELERATION: ON ({torch.cuda.get_device_name(0)}) | Precision: Float16")
+                    else:
+                        cls._instance.device = "cpu"
+                        cls._instance.dtype = torch.float32
+                        print("⚠️ WARNING: RUNNING ON CPU.")
+
+                    # Model Placeholders
+                    cls._instance.clip_model = None
+                    cls._instance.clip_processor = None
+                    cls._instance.blip_model = None
+                    cls._instance.blip_processor = None
+                    cls._instance.whisper_model = None
+                    cls._instance.tag_embeddings = None
+                    cls._instance.load_lock = threading.Lock() 
+            
+        return cls._instance
+
+    # --- 1. CLIP (Keywords) ---
+    def load_clip(self):
+        with self.load_lock:
+            if self.clip_model: return self.clip_model, self.clip_processor
+            
+            print(f"Loading CLIP (Search Engine) on {self.device}...")
+            try:
+                from transformers import CLIPProcessor, CLIPModel
+                from core.tags import get_tag_bank
+                
+                model_name = "openai/clip-vit-large-patch14"
+                self.clip_processor = CLIPProcessor.from_pretrained(model_name)
+                self.clip_model = CLIPModel.from_pretrained(model_name).to(self.device)
+                
+                # Pre-compute Tag Embeddings
+                print("Building Search Index...")
+                tags = get_tag_bank()
+                tag_embeddings_list = []
+                
+                batch_size = 100 
+                for i in range(0, len(tags), batch_size):
+                    batch_tags = tags[i:i+batch_size]
+                    inputs = self.clip_processor(text=batch_tags, return_tensors="pt", padding=True).to(self.device)
+                    with torch.no_grad():
+                        batch_embeds = self.clip_model.get_text_features(**inputs)
+                        batch_embeds /= batch_embeds.norm(p=2, dim=-1, keepdim=True)
+                        tag_embeddings_list.append(batch_embeds)
+                
+                self.tag_embeddings = torch.cat(tag_embeddings_list)
+                return self.clip_model, self.clip_processor
+
+            except Exception as e:
+                print(f"CLIP LOAD ERROR: {e}")
+                raise e
+
+    # --- 2. BLIP-2 (Action Description - THE UPGRADE) ---
+    def load_blip(self):
+        with self.load_lock:
+            if self.blip_model: return self.blip_model, self.blip_processor
+            
+            print(f"Loading BLIP-2 (Advanced Captioning) on {self.device}...")
+            try:
+                # We use Blip2Processor and Blip2ForConditionalGeneration
+                from transformers import Blip2Processor, Blip2ForConditionalGeneration
+                
+                # "opt-2.7b" is the sweet spot. Much smarter than base BLIP, but fits on GPU.
+                model_name = "Salesforce/blip2-opt-2.7b"
+                
+                self.blip_processor = Blip2Processor.from_pretrained(model_name)
+                # Load in Float16 to save memory
+                self.blip_model = Blip2ForConditionalGeneration.from_pretrained(
+                    model_name, 
+                    torch_dtype=self.dtype
+                ).to(self.device)
+                
+                return self.blip_model, self.blip_processor
+            except Exception as e:
+                print(f"BLIP-2 LOAD ERROR: {e}")
+                raise e
+
+    # --- 3. WHISPER (Audio) ---
+    def load_whisper(self):
+        with self.load_lock:
+            if self.whisper_model: return self.whisper_model
+            
+            print(f"Loading Faster-Whisper on {self.device}...")
+            from faster_whisper import WhisperModel
+            
+            try:
+                device_str = "cuda" if self.device == "cuda" else "cpu"
+                compute_type = "float16" if self.device == "cuda" else "int8"
+                self.whisper_model = WhisperModel("large-v3", device=device_str, compute_type=compute_type)
+            except Exception as e:
+                print(f"Whisper Load Error: {e}")
+                raise e
+            return self.whisper_model
+
+    def unload_models(self):
+        with self.load_lock:
+            print("🧹 Unloading AI Models...")
+            
+            if self.clip_model:
+                del self.clip_model
+                del self.clip_processor
+                del self.tag_embeddings
+            
+            if self.blip_model:
+                del self.blip_model
+                del self.blip_processor
+
+            if self.whisper_model:
+                del self.whisper_model
+                
+            self.clip_model = None
+            self.clip_processor = None
+            self.blip_model = None
+            self.blip_processor = None
+            self.whisper_model = None
+            self.tag_embeddings = None
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            print("   VRAM Cleared.")
+
+==================================================
+FILE: core\database.py
+==================================================
+import chromadb
+import json
+import os
+import threading
+import time
+import hashlib
+from pathlib import Path
+
+class Database:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, project_path=None):
+        if cls._instance is None:
+            cls._instance = super(Database, cls).__new__(cls)
+            cls._instance.client = None
+            cls._instance.project_path = project_path
+        return cls._instance
+
+    def initialize(self, project_path):
+        self.project_path = project_path
+        
+        # 1. Setup Main DB Folder
+        db_path = os.path.join(project_path, "_cyne_db")
+        os.makedirs(db_path, exist_ok=True)
+        
+        # 2. Setup Metadata Folder (The "Safe" Storage)
+        self.meta_dir = os.path.join(db_path, "metadata")
+        os.makedirs(self.meta_dir, exist_ok=True)
+        
+        # 3. Setup Vector DB
+        self.client = chromadb.PersistentClient(path=db_path)
+        self.visuals = self.client.get_or_create_collection(name="visual_embeddings", metadata={"hnsw:space": "cosine"})
+        self.faces = self.client.get_or_create_collection(name="face_embeddings", metadata={"hnsw:space": "cosine"})
+        self.transcripts = self.client.get_or_create_collection(name="transcripts", metadata={"hnsw:space": "cosine"})
+
+    def _get_meta_path(self, video_path):
+        """
+        Generates a unique, safe path for the metadata JSON inside _cyne_db.
+        Format: HASH_Filename.json
+        """
+        if not self.project_path:
+            raise ValueError("Database not initialized with project path")
+
+        # Normalize path to ensure consistency
+        norm_path = os.path.normpath(video_path).lower()
+        
+        # Create MD5 hash of the full path to prevent collisions
+        # (e.g. CameraA/C001.mp4 vs CameraB/C001.mp4)
+        path_hash = hashlib.md5(norm_path.encode('utf-8')).hexdigest()
+        
+        # Keep original filename for readability in debug
+        original_name = os.path.basename(video_path)
+        safe_name = f"{path_hash}_{original_name}.json"
+        
+        return os.path.join(self.meta_dir, safe_name)
+
+    def add_visual_embeddings(self, video_path, vectors, timestamps):
+        if not vectors: return
+        ids = [f"{video_path}_{t}" for t in timestamps]
+        metadatas = [{"source": video_path, "timestamp": t} for t in timestamps]
+        try:
+            self.visuals.upsert(ids=ids, embeddings=vectors, metadatas=metadatas)
+        except Exception as e:
+            print(f"DB ERROR: {e}")
+
+    # --- METADATA HANDLERS (Robust) ---
+    def _load_metadata(self, meta_path):
+        with self._lock:
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except: pass
+            return {}
+
+    def _save_metadata_atomic(self, meta_path, data):
+        data["last_scanned"] = str(time.time())
+        
+        with self._lock:
+            temp_path = meta_path + ".tmp"
+            try:
+                # 1. Write to temp
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=4)
+                
+                # 2. Retry Loop for Windows Rename (Fix for "Permission Denied")
+                retries = 10
+                while retries > 0:
+                    try:
+                        # On Windows, os.replace can fail if destination exists and is locked
+                        if os.path.exists(meta_path):
+                            try:
+                                os.remove(meta_path)
+                            except OSError:
+                                # If we can't delete the target, we certainly can't replace it
+                                raise OSError("Target Locked")
+                                
+                        os.rename(temp_path, meta_path)
+                        break
+                    except OSError:
+                        retries -= 1
+                        time.sleep(0.2) # Wait for file lock to release
+                
+                if retries == 0:
+                    print(f"❌ CRITICAL: Could not save metadata to {meta_path} (File Locked)")
+
+            except Exception as e:
+                print(f"Save Error: {e}")
+
+    # Wrappers now use _get_meta_path instead of pollution source folder
+    def get_video_metadata(self, video_path):
+        meta_path = self._get_meta_path(video_path)
+        return self._load_metadata(meta_path)
+
+    def save_tags(self, video_path, tags, summary_text):
+        meta_path = self._get_meta_path(video_path)
+        data = self._load_metadata(meta_path)
+        data["tags"] = tags
+        data["summary"] = summary_text
+        self._save_metadata_atomic(meta_path, data)
+
+    def save_transcript(self, video_path, transcript_list):
+        meta_path = self._get_meta_path(video_path)
+        data = self._load_metadata(meta_path)
+        data["transcript"] = transcript_list
+        self._save_metadata_atomic(meta_path, data)
+
+    def save_summary(self, video_path, summary_text):
+        meta_path = self._get_meta_path(video_path)
+        data = self._load_metadata(meta_path)
+        data["summary"] = summary_text
+        self._save_metadata_atomic(meta_path, data)
+
+    def update_metadata_key(self, video_path, key, value):
+        meta_path = self._get_meta_path(video_path)
+        data = self._load_metadata(meta_path)
+        data[key] = value
+        self._save_metadata_atomic(meta_path, data)
+
+    def clear_metadata_keys(self, video_path, keys_to_remove):
+        meta_path = self._get_meta_path(video_path)
+        if not os.path.exists(meta_path): return
+        data = self._load_metadata(meta_path)
+        changed = False
+        for key in keys_to_remove:
+            if key in data:
+                del data[key]
+                changed = True
+        if changed:
+            self._save_metadata_atomic(meta_path, data)
+
+==================================================
+FILE: core\face_db.py
+==================================================
+import os
+import pickle
+import json
+import threading
+import numpy as np
+from pathlib import Path
+
+class FaceDB:
+    _instance = None
+    _lock = threading.Lock() # Global lock for thread safety
+
+    def __new__(cls, project_path=None):
+        if cls._instance is None:
+            cls._instance = super(FaceDB, cls).__new__(cls)
+            cls._instance.initialized = False
+        return cls._instance
+
+    def __init__(self, project_path=None):
+        if self.initialized: return
+        if project_path is None: return 
+        
+        self.project_path = project_path
+        self.db_dir = os.path.join(project_path, "_cyne_db", "faces")
+        self.encodings_path = os.path.join(self.db_dir, "encodings.pkl")
+        self.names_path = os.path.join(self.db_dir, "names.json")
+        
+        os.makedirs(self.db_dir, exist_ok=True)
+        
+        self.known_encodings = []
+        self.known_ids = []
+        self.id_to_name = {}
+        
+        self.load()
+        self.initialized = True
+
+    def load(self):
+        with self._lock:
+            if os.path.exists(self.names_path):
+                try:
+                    with open(self.names_path, 'r') as f:
+                        self.id_to_name = json.load(f)
+                except:
+                    self.id_to_name = {}
+
+            if os.path.exists(self.encodings_path):
+                try:
+                    with open(self.encodings_path, 'rb') as f:
+                        data = pickle.load(f)
+                        self.known_ids = data.get("ids", [])
+                        self.known_encodings = data.get("encodings", [])
+                except:
+                    self.known_ids = []
+                    self.known_encodings = []
+
+    def find_match(self, embedding, threshold=0.6):
+        """
+        Thread-safe method to find the closest face in the DB.
+        Returns (person_id, distance) or (None, min_dist)
+        """
+        with self._lock:
+            if not self.known_encodings:
+                return None, 100.0
+            
+            try:
+                # Convert list of arrays to a single 2D matrix for vectorized math
+                known_matrix = np.array(self.known_encodings)
+                
+                # Calculate Euclidean distance to ALL faces at once
+                dists = np.linalg.norm(known_matrix - embedding, axis=1)
+                
+                # Find the best one
+                min_index = np.argmin(dists)
+                min_dist = dists[min_index]
+                
+                if min_dist < threshold:
+                    return self.known_ids[min_index], min_dist
+            except Exception as e:
+                print(f"Face Match Error: {e}")
+                
+            return None, 100.0
+
+    def add_face(self, person_id, encoding):
+        with self._lock:
+            self.known_ids.append(person_id)
+            self.known_encodings.append(encoding)
+            self.id_to_name[person_id] = person_id 
+            
+            self._save_encodings_internal()
+            self._save_names_internal()
+
+    def rename_person(self, person_id, new_name):
+        with self._lock:
+            if person_id in self.id_to_name:
+                self.id_to_name[person_id] = new_name
+            self._save_names_internal()
+
+    def remove_person(self, person_id):
+        with self._lock:
+            if person_id in self.id_to_name:
+                del self.id_to_name[person_id]
+
+            if person_id in self.known_ids:
+                new_ids = []
+                new_encodings = []
+                for pid, enc in zip(self.known_ids, self.known_encodings):
+                    if pid != person_id:
+                        new_ids.append(pid)
+                        new_encodings.append(enc)
+                
+                self.known_ids = new_ids
+                self.known_encodings = new_encodings
+        
+            self._save_names_internal()
+            self._save_encodings_internal()
+
+    def get_name(self, person_id):
+        return self.id_to_name.get(person_id, person_id)
+
+    def get_next_id(self):
+        with self._lock:
+            return f"Person_{len(self.id_to_name) + 100}"
+
+    def _save_encodings_internal(self):
+        data = { "ids": self.known_ids, "encodings": self.known_encodings }
+        with open(self.encodings_path, 'wb') as f:
+            pickle.dump(data, f)
+
+    def _save_names_internal(self):
+        with open(self.names_path, 'w') as f:
+            json.dump(self.id_to_name, f, indent=4)
+
+==================================================
+FILE: core\media_engine.py
+==================================================
+import subprocess
+import json
+import os
+import sys
+
+class MediaEngine:
+    """
+    Robust wrapper for FFprobe to extract metadata from professional video formats.
+    Replaces unreliable OpenCV metadata reading.
+    """
+    
+    @staticmethod
+    def is_available():
+        """Checks if ffprobe is installed and in PATH."""
+        try:
+            subprocess.run(["ffprobe", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except FileNotFoundError:
+            return False
+
+    @staticmethod
+    def get_metadata(file_path):
+        """
+        Returns a tuple: (width, height, fps, duration_sec)
+        Returns (0, 0, 0.0, 0.0) if reading fails.
+        """
+        if not os.path.exists(file_path):
+            return 0, 0, 0.0, 0.0
+
+        # Command to get JSON output of stream info
+        cmd = [
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_streams",
+            "-select_streams", "v:0", # Only video stream
+            file_path
+        ]
+
+        try:
+            # Run process without opening a window on Windows (creationflags)
+            if sys.platform == 'win32':
+                # CREATE_NO_WINDOW = 0x08000000
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', creationflags=0x08000000)
+            else:
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+                
+            if result.returncode != 0:
+                return 0, 0, 0.0, 0.0
+
+            data = json.loads(result.stdout)
+            
+            if not data.get("streams"):
+                return 0, 0, 0.0, 0.0
+
+            stream = data["streams"][0]
+            
+            # 1. Resolution
+            width = int(stream.get("width", 0))
+            height = int(stream.get("height", 0))
+            
+            # 2. FPS (FFprobe returns "num/den" string, e.g. "24000/1001")
+            r_frame_rate = stream.get("r_frame_rate", "0/0")
+            fps = 0.0
+            if "/" in r_frame_rate:
+                num, den = r_frame_rate.split("/")
+                if float(den) > 0:
+                    fps = float(num) / float(den)
+            else:
+                fps = float(r_frame_rate)
+
+            # 3. Duration
+            duration = float(stream.get("duration", 0.0))
+
+            return width, height, fps, duration
+
+        except Exception as e:
+            print(f"[MediaEngine] Error reading {file_path}: {e}")
+            return 0, 0, 0.0, 0.0
+
+==================================================
+FILE: core\search_engine.py
+==================================================
+import os
+import json
+import torch
+from core.database import Database
+from core.ai_models import AIBackend
+from core.face_db import FaceDB 
+
+class SearchEngine:
+    def __init__(self, project_path):
+        self.project_path = project_path
+        self.db = Database(project_path)
+        self.ai = AIBackend()
+        self.face_db = FaceDB(project_path) 
+        
+        self.cache = {} 
+        # Initial build tries to scan project folder, but main_window will 
+        # call this again with the full file list to catch external files.
+        self.build_index()
+
+    def build_index(self, file_list=None):
+        """
+        Refreshes the search index. 
+        If file_list is provided, it scans those specific files for metadata.
+        If None, it tries to scan the project folder (fallback).
+        """
+        print("Building Search Index...")
+        
+        # 1. If we have a specific list of files (from Project Tree), use that.
+        # This fixes the bug where external files weren't being indexed.
+        if file_list:
+            for video_path in file_list:
+                self._index_single_file(video_path)
+        else:
+            # Fallback: Walk project dir (only works for local assets)
+            for root, dirs, files in os.walk(self.project_path):
+                if "_cyne_db" in root: continue 
+                
+                for file in files:
+                    if file.endswith(".json"):
+                        meta_path = os.path.join(root, file)
+                        # Reconstruct video path from json path
+                        video_path = meta_path.replace(".json", "")
+                        if os.path.exists(video_path):
+                            self._index_single_file(video_path)
+
+        print(f"Index built. Loaded {len(self.cache)} items.")
+
+    def _index_single_file(self, video_path):
+        meta_path = f"{video_path}.json"
+        if not os.path.exists(meta_path): return
+        
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                self.cache[video_path] = data
+        except:
+            pass
+
+    def resolve_name_to_ids(self, query_name):
+        query_name = query_name.lower()
+        matched_ids = []
+        for person_id, name in self.face_db.id_to_name.items():
+            if query_name in name.lower():
+                matched_ids.append(person_id)
+        return matched_ids
+
+    def search(self, query):
+        query_terms = query.lower().strip().split()
+        full_query = query.lower().strip()
+        if not query_terms: return []
+
+        results = []
+        seen_paths = set()
+        
+        target_person_ids = self.resolve_name_to_ids(full_query)
+
+        # --- 1. VECTOR SEARCH (FIX: Lazy Load Models) ---
+        # If the models aren't loaded yet (e.g. fresh app start), load them now.
+        if self.ai.clip_model is None or self.ai.clip_processor is None:
+            print("🔎 Search Engine: Lazy loading AI models for visual search...")
+            try:
+                self.ai.load_clip()
+            except Exception as e:
+                print(f"⚠️ Could not load AI model for search: {e}")
+
+        # Proceed if models are available (either pre-loaded or lazy-loaded)
+        if self.ai.clip_model and self.ai.clip_processor:
+            try:
+                inputs = self.ai.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.ai.device)
+                with torch.no_grad():
+                    text_features = self.ai.clip_model.get_text_features(**inputs)
+                    text_features /= text_features.norm(p=2, dim=-1, keepdim=True)
+                
+                    query_vector = text_features.cpu().numpy()[0].tolist()
+
+                vec_res = self.db.visuals.query(
+                    query_embeddings=[query_vector],
+                    n_results=20,
+                    include=["metadatas", "distances"]
+                )
+                
+                if vec_res['ids'] and vec_res['ids'][0]:
+                    for i, _id in enumerate(vec_res['ids'][0]):
+                        metadata = vec_res['metadatas'][0][i]
+                        distance = vec_res['distances'][0][i]
+                        score = max(0, (1 - distance) * 100)
+                        
+                        if score < 15: continue
+                        
+                        path = metadata['source']
+                        timestamp = metadata.get('timestamp', 0)
+                        
+                        results.append({
+                            "path": path,
+                            "match_type": "VISUAL (AI)",
+                            "context": f"Visual match at {int(timestamp)}s",
+                            "score": score,
+                            "timestamp": timestamp
+                        })
+                        seen_paths.add(path)
+            except Exception as e:
+                print(f"Vector search skip: {e}")
+        else:
+            print("⚠️ Visual Search skipped (Models failed to load).")
+
+        # --- 2. TEXT & METADATA SEARCH (Improved Matching) ---
+        for video_path, data in self.cache.items():
+            score = 0
+            match_type = ""
+            context = ""
+            timestamp = 0
+            
+            filename = os.path.basename(video_path).lower()
+
+            # A. Filename Match
+            if all(t in filename for t in query_terms):
+                score += 100
+                match_type = "FILENAME"
+                context = "Filename match"
+
+            # B. FACE SEARCH
+            elif target_person_ids and "faces" in data:
+                video_faces = data["faces"]
+                for target_id in target_person_ids:
+                    if target_id in video_faces:
+                        score = 200 
+                        match_type = "CAST"
+                        human_name = self.face_db.get_name(target_id)
+                        context = f"Featuring: {human_name}"
+                        break
+
+            # C. Transcript (Tokenized) - Support 'segments' or 'transcript' keys
+            elif "segments" in data or "transcript" in data:
+                # Prefer 'segments', fallback to 'transcript'
+                trans_data = data.get("segments") or data.get("transcript")
+                
+                if isinstance(trans_data, list):
+                    for seg in trans_data:
+                        seg_lower = seg["text"].lower()
+                        # Allow partial match: at least one unique keyword must exist
+                        if full_query in seg_lower:
+                             score = 80
+                             match_type = "DIALOGUE"
+                             timestamp = seg["start"]
+                             context = f"Says: \"{seg['text']}\""
+                             break 
+                elif isinstance(trans_data, str) and full_query in trans_data.lower():
+                    score = 60
+                    match_type = "DIALOGUE"
+                    context = "Keyword found in audio"
+
+            # D. Visual Tags (Tokenized)
+            elif "tags" in data:
+                tags = [t.lower() for t in data["tags"]]
+                for tag in tags:
+                    if full_query in tag:
+                        score += 50
+                        match_type = "TAG"
+                        context = f"Tagged: {tag}"
+                        break
+            
+            if score > 0 and video_path not in seen_paths:
+                results.append({
+                    "path": video_path,
+                    "match_type": match_type,
+                    "context": context,
+                    "score": score,
+                    "timestamp": timestamp
+                })
+
+        results.sort(key=lambda x: x['score'], reverse=True)
+        return results
+
+==================================================
+FILE: core\tags.py
+==================================================
+import os
+from pathlib import Path
+
+# --- ARCHITECTURAL STRATEGY ---
+# 1. PRIORITY: Distinct Objects > Abstract Concepts. 
+#    (Prevents "Lens Flare" false positives when the image is just a bright light).
+# 2. ACTIONS: Gerunds (Ending in -ing) work best for CLIP to detect motion/activity.
+
+# A curated "Essentials" list to ensure the app works well out-of-the-box.
+DEFAULT_TAG_BANK = [
+    # --- PROPS & OBJECTS (The most important category for B-Roll) ---
+    "Smartphone", "Laptop", "Notebook", "Pen", "Pencil", "Camera", "Headphones",
+    "Coffee Cup", "Glass of Water", "Wine Bottle", "Beer", "Plate of Food", "Sandwich",
+    "Car", "Taxi", "Police Car", "Ambulance", "Bicycle", "Motorcycle", "Bus", "Train",
+    "Boat", "Yacht", "Airplane", "Helicopter", "Drone",
+    "Gun", "Knife", "Sword", "Ring", "Diamond", "Money", "Credit Card", "Wallet",
+    "Bag", "Suitcase", "Backpack", "Umbrella", "Glasses", "Sunglasses", "Watch",
+    "Mirror", "Clock", "Lamp", "Candle", "Fire", "Smoke",
+    "Chair", "Table", "Sofa", "Bed", "Door", "Window", "Carpet", "Curtain",
+    
+    # --- PEOPLE ---
+    "Woman", "Man", "Girl", "Boy", "Baby", "Toddler", "Teenager", "Elderly Person",
+    "Crowd", "Couple", "Friends", "Family", "Business Team", "Police Officer",
+    "Doctor", "Nurse", "Soldier", "Artist", "Musician", "Chef", "Waiter", "Driver",
+    "Silhouette", "Portrait", "Close up of Eyes", "Close up of Hands",
+
+    # --- ACTIONS (Verbs) ---
+    "Running", "Walking", "Sitting", "Standing", "Sleeping", "Eating", "Drinking",
+    "Talking", "Shouting", "Laughing", "Smiling", "Crying", "Frowning",
+    "Typing", "Writing", "Reading", "Cooking", "Driving", "Cycling", "Swimming",
+    "Dancing", "Fighting", "Punching", "Hugging", "Kissing", "Shaking Hands",
+    "Clapping", "Pointing", "Thinking", "Looking at Phone", "Working on Laptop",
+
+    # --- ANIMALS ---
+    "Dog", "Cat", "Bird", "Eagle", "Pigeon", "Horse", "Cow", "Sheep", "Chicken",
+    "Fish", "Shark", "Whale", "Lion", "Tiger", "Bear", "Wolf", "Snake", "Spider",
+    "Butterfly", "Bee", "Insect",
+
+    # --- NATURE & ENVIRONMENTS ---
+    "Forest", "Tree", "Flower", "Grass", "Mountain", "Desert", "Sand", "Beach",
+    "Ocean", "River", "Lake", "Waterfall", "Rain", "Snow", "Storm", "Clouds",
+    "Blue Sky", "Sunset", "Sunrise", "Night Sky", "Moon", "Stars",
+    "City Skyline", "Skyscraper", "Street", "Road", "Bridge", "Tunnel", "Highway",
+    "Traffic", "Building", "House", "Apartment", "Office", "Hospital", "School",
+    "Restaurant", "Cafe", "Bar", "Club", "Gym", "Airport", "Station", "Warehouse",
+    "Ruins", "Construction Site",
+
+    # --- COLORS & LIGHTING (Distinct only) ---
+    "Red", "Blue", "Green", "Yellow", "Purple", "Orange", "Black", "White",
+    "Neon Light", "Sunlight", "Shadows", "Silhouette", "Reflection",
+
+    # --- CINEMATOGRAPHY (Strictly Distinct) ---
+    # We removed ambiguous terms like "Dutch Angle" or "Medium Shot" to reduce noise.
+    "Aerial View", "Drone Shot", "Underwater", "Macro Shot", "Black and White",
+    "Green Screen", "Animation", "Text Overlay"
+]
+
+def get_tag_bank():
+    """
+    Loads tags from 'vocabulary.txt' if it exists in the project root or assets folder.
+    Otherwise, returns the sophisticated DEFAULT_TAG_BANK.
+    """
+    # 1. Check for custom vocabulary file in common locations
+    possible_paths = [
+        Path("vocabulary.txt"),
+        Path("assets/vocabulary.txt"),
+    ]
+    
+    custom_tags = []
+    
+    for p in possible_paths:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    # Read lines, strip whitespace, remove empty lines
+                    lines = [line.strip() for line in f.readlines() if line.strip()]
+                    custom_tags.extend(lines)
+                print(f"[Tags] Loaded {len(lines)} custom tags from {p}")
+                break # Stop after finding the first valid file
+            except Exception as e:
+                print(f"[Tags] Error reading {p}: {e}")
+
+    # 2. Merge or Fallback
+    if custom_tags:
+        # Deduplicate while preserving order
+        return list(dict.fromkeys(custom_tags))
+    
+    return DEFAULT_TAG_BANK
+
+==================================================
+FILE: gui\faces_tab.py
+==================================================
+import os
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, QGridLayout, 
+                             QFrame, QMessageBox, QInputDialog, QMenu, QApplication)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap, QAction, QImage, QMouseEvent
+from core.face_db import FaceDB
+
+class FaceCard(QFrame):
+    delete_requested = pyqtSignal(str) 
+    rename_requested = pyqtSignal(str, str)
+    selection_changed = pyqtSignal(str, bool) # NEW: Signal for multi-select
+
+    def __init__(self, person_id, image, name="Unknown"):
+        super().__init__()
+        self.person_id = person_id
+        self.current_name = name
+        self.is_selected = False # NEW: Track state
+        
+        self.setFixedSize(130, 160)
+        self.update_style() # NEW: centralized style
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 5)
+        
+        self.img_lbl = QLabel()
+        if isinstance(image, QImage):
+            pix = QPixmap.fromImage(image)
+        else:
+            pix = image
+            
+        pix = pix.scaled(90, 90, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+        self.img_lbl.setPixmap(pix)
+        self.img_lbl.setFixedSize(90, 90)
+        self.img_lbl.setStyleSheet("border-radius: 45px; background: black; border: 2px solid #333;")
+        layout.addWidget(self.img_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        self.name_lbl = QLabel(name)
+        self.name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.name_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 11px; margin-top: 5px; border: none; background: transparent;")
+        layout.addWidget(self.name_lbl)
+
+    def update_style(self):
+        # Visual feedback for selection
+        if self.is_selected:
+            self.setStyleSheet("""
+                FaceCard { background: #3A3445; border-radius: 8px; border: 2px solid #BEAEDB; }
+            """)
+        else:
+            self.setStyleSheet("""
+                FaceCard { background: #252526; border-radius: 8px; border: 1px solid #333; }
+                FaceCard:hover { border: 1px solid #666; background: #2A2A2A; }
+            """)
+
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Handle Multi-Select with CTRL
+            modifiers = QApplication.keyboardModifiers()
+            if modifiers == Qt.KeyboardModifier.ControlModifier:
+                self.is_selected = not self.is_selected
+                self.update_style()
+                self.selection_changed.emit(self.person_id, self.is_selected)
+            else:
+                # If just clicking, rename (old behavior) or deselect others?
+                # For now, let's keep rename on simple click for speed, 
+                # but maybe double-click is better? Let's stick to simple click for rename for now.
+                new_name, ok = QInputDialog.getText(self, "Rename", f"Rename {self.current_name} to:")
+                if ok and new_name:
+                    self.name_lbl.setText(new_name)
+                    self.current_name = new_name
+                    self.rename_requested.emit(self.person_id, new_name)
+
+    def contextMenuEvent(self, event):
+        # We handle the menu in the parent to support merging multiple cards
+        event.ignore() 
+
+class FacesTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        
+        # Header with instructions
+        header_layout = QVBoxLayout()
+        lbl_title = QLabel("DETECTED PEOPLE")
+        lbl_title.setStyleSheet("color: #DDD; font-weight: 900; font-size: 14px;")
+        
+        lbl_hint = QLabel("Hold CTRL + Click to select multiple faces to MERGE them.")
+        lbl_hint.setStyleSheet("color: #777; font-size: 11px; margin-bottom: 10px;")
+        
+        header_layout.addWidget(lbl_title)
+        header_layout.addWidget(lbl_hint)
+        layout.addLayout(header_layout)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: #121212; border: none;")
+        
+        self.grid_container = QWidget()
+        self.grid_layout = QGridLayout(self.grid_container)
+        self.grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.grid_layout.setSpacing(15)
+        
+        scroll.setWidget(self.grid_container)
+        layout.addWidget(scroll)
+        
+        self.faces_count = 0
+        self.cards = {} 
+        self.selected_ids = set() # Track multiple selections
+        self.project_path = None
+        self.face_db = None
+
+    def set_project_path(self, path):
+        self.project_path = path
+        self.face_db = FaceDB(path)
+        self.load_existing_faces()
+
+    def load_existing_faces(self):
+        # Clear existing
+        for pid in list(self.cards.keys()):
+            self.cards[pid].deleteLater()
+        self.cards = {}
+        self.faces_count = 0
+        self.selected_ids.clear()
+
+        if not self.face_db: return
+        
+        # Sort by name for neatness
+        sorted_ids = sorted(self.face_db.known_ids, key=lambda x: self.face_db.get_name(x))
+
+        for pid in sorted_ids:
+            if pid in self.cards: continue
+            
+            name = self.face_db.get_name(pid)
+            thumb_path = os.path.join(self.face_db.db_dir, f"{pid}.jpg")
+            
+            if os.path.exists(thumb_path):
+                image = QImage(thumb_path)
+                if not image.isNull():
+                    self.add_face_card(pid, name, image)
+
+    def add_face_card(self, person_id, name, q_image):
+        if person_id in self.cards: return
+
+        row = self.faces_count // 5
+        col = self.faces_count % 5
+        
+        card = FaceCard(person_id, q_image, name)
+        card.delete_requested.connect(self.delete_face)
+        card.rename_requested.connect(self.handle_rename)
+        card.selection_changed.connect(self.handle_selection)
+        
+        self.grid_layout.addWidget(card, row, col)
+        self.cards[person_id] = card
+        self.faces_count += 1
+
+    def handle_selection(self, pid, is_selected):
+        if is_selected:
+            self.selected_ids.add(pid)
+        else:
+            self.selected_ids.discard(pid)
+
+    def contextMenuEvent(self, event):
+        # Global context menu for the grid
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background: #333; color: white; border: 1px solid #555; } QMenu::item:selected { background: #555; }")
+        
+        if len(self.selected_ids) > 1:
+            merge_action = QAction(f"Merge {len(self.selected_ids)} Selected People", self)
+            merge_action.triggered.connect(self.merge_selected_faces)
+            menu.addAction(merge_action)
+        
+        refresh_action = QAction("Refresh Grid", self)
+        refresh_action.triggered.connect(self.load_existing_faces)
+        menu.addAction(refresh_action)
+        
+        menu.exec(event.globalPos())
+
+    def merge_selected_faces(self):
+        if len(self.selected_ids) < 2: return
+        
+        ids_to_merge = list(self.selected_ids)
+        primary_id = ids_to_merge[0] # The one we keep
+        primary_name = self.face_db.get_name(primary_id)
+        
+        # Ask for target name
+        final_name, ok = QInputDialog.getText(self, "Merge Faces", 
+            f"Merging {len(ids_to_merge)} entries.\nWhat is the real name?", text=primary_name)
+        
+        if not ok: return
+
+        # Perform Merge in Backend
+        # 1. Update Name of Primary
+        self.face_db.rename_person(primary_id, final_name)
+        
+        # 2. For every other ID, we need to:
+        #    a. Remove it from FaceDB
+        #    b. Update known_encodings (actually, FaceDB needs a merge function, but for now we'll just delete the duplicates)
+        #    NOTE: Real merging is complex (averaging embeddings). 
+        #    For V2.0, we will just DELETE the duplicates and rename the Primary. 
+        #    The "knowledge" of the deleted faces is lost, but the user gets a clean list.
+        
+        #    BETTER APPROACH: Re-map the IDs in the FaceDB.
+        #    Since we don't have a deep merge function yet, we will just delete the others.
+        
+        for pid in ids_to_merge[1:]:
+            self.delete_face(pid, confirm=False)
+            
+        # 3. Rename Primary in UI
+        self.handle_rename(primary_id, final_name)
+        
+        # Reset Selection
+        self.selected_ids.clear()
+        self.load_existing_faces() # Refresh grid to remove gaps
+        
+        QMessageBox.information(self, "Merge Complete", f"Merged into '{final_name}'.\n(Note: You may need to re-scan to improve recognition for this person in future files.)")
+
+    def handle_rename(self, person_id, new_name):
+        if self.face_db:
+            self.face_db.rename_person(person_id, new_name)
+
+    def delete_face(self, person_id, confirm=True):
+        if confirm:
+            name = self.cards[person_id].current_name
+            conf = QMessageBox.question(self, "Confirm Delete", f"Delete '{name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if conf == QMessageBox.StandardButton.No: return
+
+        if person_id in self.cards:
+            # Remove UI
+            widget = self.cards[person_id]
+            self.grid_layout.removeWidget(widget)
+            widget.deleteLater()
+            del self.cards[person_id]
+            
+            # Remove DB
+            if self.face_db:
+                self.face_db.remove_person(person_id)
+                thumb_path = os.path.join(self.face_db.db_dir, f"{person_id}.jpg")
+                if os.path.exists(thumb_path):
+                    try: os.remove(thumb_path)
+                    except: pass
+        
+        if person_id in self.selected_ids:
+            self.selected_ids.discard(person_id)
+
+==================================================
+FILE: gui\main_window.py
+==================================================
+# [FILE: gui/main_window.py]
+import os
+import json
+import cv2 
+import datetime
+import sys
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
+                             QPushButton, QLabel, QProgressBar, QSplitter, 
+                             QFileDialog, QMessageBox, QFrame, QTextBrowser, 
+                             QProgressDialog, QStackedWidget, QButtonGroup)
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QAction, QPixmap, QImage, QIcon
+
+from config import APP_NAME, VERSION, COLORS, FILE_EXT
+from gui.media_tree import MediaTree
+from gui.faces_tab import FacesTab
+from gui.search_tab import SearchTab
+from gui.player_window import PlayerWindow
+from gui.metadata_panel import MetadataPanel 
+from core.ai_models import AIBackend
+
+class MainWindow(QMainWindow):
+    def __init__(self, project_path, project_name):
+        super().__init__()
+        self.project_path = project_path
+        self.project_name = project_name
+        self.project_file = os.path.join(self.project_path, f"{self.project_name}{FILE_EXT}")
+        self.is_dirty = False
+        
+        # --- FIX: Initialize this variable explicitly to prevent crash ---
+        self.current_preview_path = None 
+        # ----------------------------------------------------------------
+
+        self.setWindowTitle(f"{APP_NAME} - {project_name}")
+        self.resize(1600, 950)
+        
+        from core.database import Database
+        self.db = Database()
+        self.db.initialize(self.project_path)
+        
+        from core.face_db import FaceDB
+        FaceDB(self.project_path)
+        
+        self.setup_ui()
+        self.create_menu_bar()
+        
+        self.search_tab.set_project_path(self.project_path)
+        self.faces_tab.set_project_path(self.project_path)
+        
+        self.load_project()
+        self.worker = None
+        self.player_window = None 
+        self.import_worker = None
+
+    def setup_ui(self):
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        
+        main_layout = QHBoxLayout(main_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # --- 1. SIDEBAR ---
+        self.sidebar = QWidget()
+        self.sidebar.setObjectName("Sidebar")
+        self.sidebar.setFixedWidth(110) 
+        
+        sb_layout = QVBoxLayout(self.sidebar)
+        sb_layout.setContentsMargins(10, 20, 10, 20)
+        sb_layout.setSpacing(15)
+
+        self.nav_group = QButtonGroup()
+        self.nav_group.setExclusive(True)
+
+        def create_nav_btn(text, id):
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setFixedSize(90, 50)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: transparent;
+                    border: none; color: {COLORS['text_dim']};
+                    font-size: 10px; font-weight: bold; text-align: center;
+                }}
+                QPushButton:checked {{
+                    color: {COLORS['accent']};
+                    border-left: 2px solid {COLORS['accent']};
+                }}
+                QPushButton:hover {{ color: white; }}
+            """)
+            self.nav_group.addButton(btn, id)
+            sb_layout.addWidget(btn)
+            return btn
+
+        self.btn_nav_media = create_nav_btn("MEDIA\nLIB", 0)
+        self.btn_nav_faces = create_nav_btn("PEOPLE\nFACES", 1)
+        self.btn_nav_search = create_nav_btn("SMART\nSEARCH", 2)
+        
+        self.nav_group.buttonClicked.connect(self.switch_tab)
+        
+        sb_layout.addStretch() 
+        
+        lbl_ver = QLabel(VERSION)
+        lbl_ver.setStyleSheet("color: #444; font-size: 9px;")
+        lbl_ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sb_layout.addWidget(lbl_ver)
+
+        main_layout.addWidget(self.sidebar)
+
+        # --- 2. MAIN CONTENT AREA ---
+        content_area = QWidget()
+        ca_layout = QVBoxLayout(content_area)
+        ca_layout.setContentsMargins(0,0,0,0)
+        ca_layout.setSpacing(0)
+
+        # A. Top Action Bar
+        self.top_bar = QWidget()
+        self.top_bar.setStyleSheet(f"background: {COLORS['bg_app']}; border-bottom: 1px solid {COLORS['border']};")
+        self.top_bar.setFixedHeight(60)
+        tb_layout = QHBoxLayout(self.top_bar)
+        tb_layout.setContentsMargins(20, 0, 20, 0)
+        
+        self.lbl_title = QLabel(self.project_name.upper())
+        self.lbl_title.setStyleSheet(f"color: {COLORS['text_main']}; font-weight: 900; font-size: 14px; letter-spacing: 1px;")
+        tb_layout.addWidget(self.lbl_title)
+        
+        tb_layout.addStretch()
+        
+        # Action Buttons
+        self.btn_index = self.create_action_btn("INDEX VISUALS", self.run_indexing)
+        self.btn_transcribe = self.create_action_btn("TRANSCRIBE AUDIO", self.run_transcription)
+        self.btn_faces = self.create_action_btn("SCAN FACES", self.run_face_scan)
+        
+        self.btn_cancel = QPushButton("CANCEL")
+        self.btn_cancel.clicked.connect(self.cancel_worker)
+        self.btn_cancel.hide()
+        self.btn_cancel.setStyleSheet("background: #b71c1c; color: white; border: none; font-weight: bold; padding: 6px 12px; border-radius: 4px;")
+        
+        tb_layout.addWidget(self.btn_index)
+        tb_layout.addWidget(self.btn_transcribe)
+        tb_layout.addWidget(self.btn_faces)
+        tb_layout.addWidget(self.btn_cancel)
+        
+        ca_layout.addWidget(self.top_bar)
+
+        # B. Stacked Pages
+        self.pages = QStackedWidget()
+        
+        self.media_page = QWidget()
+        self.setup_media_page()
+        self.pages.addWidget(self.media_page)
+        
+        self.faces_tab = FacesTab()
+        self.pages.addWidget(self.faces_tab)
+        
+        self.search_tab = SearchTab()
+        self.pages.addWidget(self.search_tab)
+        
+        ca_layout.addWidget(self.pages)
+        
+        # C. Status Bar
+        self.status_bar = QWidget()
+        self.status_bar.setFixedHeight(25)
+        self.status_bar.setStyleSheet(f"background: {COLORS['accent']};") 
+        stat_layout = QHBoxLayout(self.status_bar)
+        stat_layout.setContentsMargins(10, 0, 10, 0)
+        
+        self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("color: black; font-weight: bold; font-size: 11px;")
+        stat_layout.addWidget(self.status_label)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedHeight(12)
+        self.progress_bar.setStyleSheet("QProgressBar { border: 1px solid #222; background: #333; border-radius: 2px; } QProgressBar::chunk { background: white; }")
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.hide()
+        stat_layout.addWidget(self.progress_bar)
+        
+        ca_layout.addWidget(self.status_bar)
+
+        main_layout.addWidget(content_area)
+        
+        self.btn_nav_media.setChecked(True)
+        self.pages.setCurrentIndex(0)
+
+    def switch_tab(self, btn):
+        id = self.nav_group.id(btn)
+        self.pages.setCurrentIndex(id)
+
+    def create_action_btn(self, text, func):
+        btn = QPushButton(text)
+        btn.clicked.connect(func)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background: transparent;
+                border: 1px solid {COLORS['border']}; 
+                color: {COLORS['text_dim']}; padding: 6px 12px; font-size: 11px; font-weight: bold;
+            }}
+            QPushButton:hover {{ 
+                border-color: {COLORS['accent']};
+                color: {COLORS['accent']}; 
+            }}
+            QPushButton:disabled {{ color: #444; border-color: #333; }}
+        """)
+        return btn
+
+    def setup_media_page(self):
+        layout = QVBoxLayout(self.media_page)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        tbar = QHBoxLayout()
+        
+        btn_add = QPushButton(" + ADD FILE ")
+        btn_add.setProperty("class", "accent")
+        btn_add.clicked.connect(self.add_files)
+        
+        btn_folder = QPushButton(" + ADD FOLDER ")
+        btn_folder.setStyleSheet(f"background: {COLORS['bg_input']}; color: white;")
+        btn_folder.clicked.connect(self.add_folder)
+        
+        tbar.addWidget(btn_add)
+        tbar.addWidget(btn_folder)
+        
+        btn_sel_all = QPushButton("All")
+        btn_sel_all.setFixedWidth(50)
+        btn_sel_all.clicked.connect(lambda: self.tree.toggle_all(True))
+        
+        btn_sel_none = QPushButton("None")
+        btn_sel_none.setFixedWidth(50)
+        btn_sel_none.clicked.connect(lambda: self.tree.toggle_all(False))
+        
+        tbar.addStretch()
+        tbar.addWidget(btn_sel_all)
+        tbar.addWidget(btn_sel_none)
+        
+        layout.addLayout(tbar)
+        
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(1)
+        splitter.setStyleSheet(f"QSplitter::handle {{ background: {COLORS['border']}; }}")
+        
+        self.tree = MediaTree()
+        self.tree.itemSelectionChanged.connect(self.update_preview_panel)
+        self.tree.files_dropped_signal.connect(self.handle_dropped_files)
+        self.tree.clear_data_signal.connect(self.handle_clear_data)
+        
+        splitter.addWidget(self.tree)
+        
+        self.preview_panel = QWidget()
+        self.preview_panel.setStyleSheet(f"background: {COLORS['bg_panel']}; border-left: 1px solid {COLORS['border']};")
+        pp_layout = QVBoxLayout(self.preview_panel)
+        pp_layout.setContentsMargins(0,0,0,0)
+        
+        self.preview_lbl = QLabel()
+        self.preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_lbl.setStyleSheet("background: #000;")
+        self.preview_lbl.setMinimumHeight(250)
+        pp_layout.addWidget(self.preview_lbl)
+        
+        self.meta_panel = MetadataPanel()
+        self.meta_panel.save_requested.connect(self.save_metadata_handler)
+        pp_layout.addWidget(self.meta_panel)
+        
+        splitter.addWidget(self.preview_panel)
+        splitter.setSizes([900, 400])
+        
+        layout.addWidget(splitter)
+
+    def create_menu_bar(self):
+        menubar = self.menuBar()
+        menubar.setStyleSheet(f"QMenuBar {{ background: {COLORS['bg_panel']}; color: #DDD; }} QMenuBar::item:selected {{ background: #333; }}")
+        
+        file_menu = menubar.addMenu("File")
+        
+        act_new = QAction("New Project", self)
+        act_new.triggered.connect(self.new_project_handler)
+        file_menu.addAction(act_new)
+        
+        act_save = QAction("Save Project", self)
+        act_save.setShortcut("Ctrl+S")
+        act_save.triggered.connect(self.save_project)
+        file_menu.addAction(act_save)
+        
+        act_save_as = QAction("Save Project As...", self)
+        act_save_as.triggered.connect(self.save_project_as)
+        file_menu.addAction(act_save_as)
+
+    def update_preview_panel(self):
+        paths = self.tree.get_selected_file_paths()
+        if not paths: 
+            self.preview_lbl.clear()
+            self.meta_panel.clear()
+            self.current_preview_path = None
+            return
+        
+        file_path = paths[0]
+        self.current_preview_path = file_path 
+        
+        # 1. Load Thumbnail / Preview
+        try:
+            cap = cv2.VideoCapture(file_path)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total > 0:
+                target_frame = 100 if total > 120 else total // 2
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            ret, frame = cap.read()
+            cap.release()
+            
+            if ret:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = frame.shape
+                bytes_per_line = ch * w
+                qt_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+                pix = QPixmap.fromImage(qt_img)
+                scaled_pix = pix.scaled(self.preview_lbl.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.preview_lbl.setPixmap(scaled_pix)
+            else:
+                self.preview_lbl.setText("No Preview")
+        except:
+            self.preview_lbl.setText("Preview unavailable")
+
+        # 2. Load Metadata into Editor
+        tags = []
+        summary = ""
+        
+        try:
+            data = self.db.get_video_metadata(file_path)
+            tags = data.get("tags", [])
+            summary = data.get("summary", "")
+            
+            if not summary:
+                trans_data = data.get("transcript", [])
+                if isinstance(trans_data, list) and trans_data:
+                    preview_text = " ".join([seg['text'] for seg in trans_data[:10]])
+                    summary = f"(Auto-Transcript): {preview_text}..."
+        except Exception as e:
+            print(f"Meta load error: {e}")
+            
+        self.meta_panel.load_data(file_path, tags, summary)
+
+    def save_metadata_handler(self, new_tags, new_summary):
+        if not self.current_preview_path: return
+        try:
+            self.db.save_tags(self.current_preview_path, new_tags, new_summary)
+            if new_tags:
+                self.tree.mark_visuals_done(self.current_preview_path, new_summary)
+            self.search_tab.engine.build_index([self.current_preview_path])
+            self.status_label.setText(f"Saved metadata for {os.path.basename(self.current_preview_path)}")
+            self.mark_dirty()
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Could not save metadata: {e}")
+
+    # --- Standard Handlers ---
+    def fmt_time(self, seconds):
+        m, s = divmod(seconds, 60)
+        return f"{int(m):02}:{int(s):02}"
+
+    def handle_transcript_click(self, url):
+        pass
+
+    def add_files(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Select Video Files", "", "Video (*.mp4 *.mov *.mxf *.braw *.avi)")
+        if files:
+            self.status_label.setText(f"Adding {len(files)} files...")
+            self.tree.add_files_flat(files)
+            self.search_tab.engine.build_index(self.tree.get_all_file_paths())
+            self.mark_dirty() 
+            self.status_label.setText(f"Added {len(files)} files.")
+
+    def add_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder to Import")
+        if not folder: return
+        self.start_import_worker([folder], is_folder=True)
+        
+    def handle_dropped_files(self, local_urls):
+        valid_files = []
+        folders = []
+        valid_exts = {'.mp4', '.mov', '.mxf', '.braw', '.avi'}
+        
+        for path in local_urls:
+            if os.path.isdir(path):
+                folders.append(path)
+            elif os.path.splitext(path)[1].lower() in valid_exts:
+                valid_files.append(path)
+                
+        if valid_files:
+            self.tree.add_files_flat(valid_files)
+            self.search_tab.engine.build_index(self.tree.get_all_file_paths()) 
+            self.mark_dirty()
+        
+        if folders:
+            self.start_import_worker(folders, is_folder=True)
+
+    def start_import_worker(self, paths, is_folder=False):
+        self.import_progress = QProgressDialog("Scanning for media...", "Cancel", 0, 0, self)
+        self.import_progress.setWindowTitle("Importing Media")
+        self.import_progress.setWindowModality(Qt.WindowModality.WindowModal)
+        self.import_progress.setMinimumWidth(350)
+        self.import_progress.show()
+
+        try:
+            from workers.importer import FolderImportWorker
+            self.import_worker = FolderImportWorker(paths[0]) 
+            self.import_worker.progress_signal.connect(self.update_import_label)
+            self.import_worker.finished_signal.connect(self.on_import_finished)
+            self.import_worker.start()
+        except ImportError:
+            QMessageBox.critical(self, "Error", "Could not load workers/importer.py")
+            self.import_progress.close()
+
+    def update_import_label(self, text):
+        self.import_progress.setLabelText(text)
+
+    def on_import_finished(self, files):
+        self.import_progress.close()
+        if files:
+            self.status_label.setText(f"Importing {len(files)} files into tree...")
+            self.tree.add_files_flat(files) 
+            self.search_tab.engine.build_index(self.tree.get_all_file_paths())
+            self.mark_dirty()
+            self.status_label.setText(f"Added {len(files)} files.")
+        else:
+            QMessageBox.information(self, "Import", "No video files found.")
+
+    def handle_clear_data(self, files, data_type):
+        confirm = QMessageBox.question(self, "Confirm Clear", f"Are you sure you want to clear {data_type} data for {len(files)} files?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if confirm == QMessageBox.StandardButton.No: return
+        
+        keys_map = {
+            'visuals': ['tags', 'summary'],
+            'audio': ['transcript', 'summary'],
+            'faces': ['faces']
+        }
+        
+        keys = keys_map.get(data_type, [])
+        for fpath in files:
+            self.db.clear_metadata_keys(fpath, keys)
+            self.tree.reset_status(fpath, data_type)
+            
+        self.update_preview_panel()
+        self.status_label.setText(f"Cleared {data_type} for {len(files)} files.")
+
+    def mark_dirty(self):
+        self.is_dirty = True
+        self.setWindowTitle(f"{APP_NAME} - {self.project_name} *")
+
+    def save_project(self):
+        files = self.tree.get_all_file_paths()
+        data = {"version": "2.0", "files": files}
+        try:
+            with open(self.project_file, 'w') as f: json.dump(data, f, indent=4)
+            self.status_label.setText(f"Project saved ({len(files)} files).")
+            self.is_dirty = False
+            self.setWindowTitle(f"{APP_NAME} - {self.project_name}")
+            return True
+        except Exception as e: 
+            QMessageBox.warning(self, "Save Error", str(e))
+            return False
+            
+    def save_project_as(self):
+        fpath, _ = QFileDialog.getSaveFileName(self, "Save Project As", self.project_path, f"Cyne Project (*{FILE_EXT})")
+        if fpath:
+            self.project_file = fpath
+            self.project_name = os.path.basename(fpath).replace(FILE_EXT, "")
+            self.save_project()
+
+    def new_project_handler(self):
+        QMessageBox.information(self, "New Project", "To create a new project, please restart the application.")
+
+    def load_project(self):
+        if os.path.exists(self.project_file):
+            try:
+                with open(self.project_file, 'r') as f:
+                    data = json.load(f)
+                    files = data.get("files", [])
+                    if files: 
+                        self.tree.add_files_flat(files)
+                        self.search_tab.engine.build_index(files)
+            except: pass
+
+    def closeEvent(self, event):
+        AIBackend().unload_models()
+        if self.is_dirty:
+            reply = QMessageBox.question(self, "Unsaved Changes", "Save before quitting?", QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+            if reply == QMessageBox.StandardButton.Save:
+                if self.save_project(): event.accept()
+                else: event.ignore()
+            elif reply == QMessageBox.StandardButton.Discard: event.accept()
+            else: event.ignore()
+        else: event.accept()
+
+    # --- WORKER HANDLERS ---
+    def lock_buttons(self, locked):
+        self.btn_index.setDisabled(locked)
+        self.btn_transcribe.setDisabled(locked)
+        self.btn_faces.setDisabled(locked)
+        self.btn_cancel.setVisible(locked)
+
+    def cancel_worker(self):
+        if self.worker and self.worker.isRunning():
+            self.status_label.setText("Stopping worker...")
+            self.worker.stop()
+
+    def worker_finished(self):
+        self.lock_buttons(False)
+        self.progress_bar.hide()
+        current_text = self.status_label.text()
+        if "CRITICAL" not in current_text and "Error" not in current_text:
+            self.status_label.setText("Task Complete.")
+        self.mark_dirty()
+        self.search_tab.engine.build_index(self.tree.get_all_file_paths())
+        self.worker = None
+        self.update_preview_panel()
+
+    def update_log_status(self, msg):
+        self.status_label.setText(msg)
+
+    def update_progress(self, val):
+        if self.progress_bar.isHidden(): self.progress_bar.show()
+        self.progress_bar.setValue(val)
+        
+    def update_visuals_status(self, path, summary_text):
+        self.tree.mark_visuals_done(path, summary_text)
+        
+        # --- FIXED: CRASH PREVENTION ---
+        # Only try to update the preview panel if we have a valid selection path
+        if self.current_preview_path and path:
+            # Normalize paths to ensure they match (Windows slash fix)
+            if os.path.normpath(path).lower() == os.path.normpath(self.current_preview_path).lower():
+                self.update_preview_panel()
+
+    def update_audio_status(self, path):
+        self.tree.mark_audio_done(path)
+        if self.current_preview_path and os.path.normpath(path) == os.path.normpath(self.current_preview_path):
+            self.update_preview_panel()
+
+    def update_faces_status(self, path, count):
+        self.tree.mark_faces_done(path)
+        
+    def add_new_face_to_ui(self, pid, name, img):
+        self.faces_tab.add_face_card(pid, name, img)
+
+    def get_files_to_process(self, check_key=None):
+        selected = self.tree.get_checked_file_paths()
+        if not selected:
+            QMessageBox.warning(self, "No Selection", "Please verify that the checkboxes next to the files are ticked.")
+            return []
+        
+        if check_key:
+            filtered = []
+            for path in selected:
+                meta = self.db.get_video_metadata(path)
+                if check_key == 'tags' and meta.get('tags'): continue
+                if check_key == 'transcript' and meta.get('transcript'): continue
+                if check_key == 'faces' and meta.get('faces'): continue
+                filtered.append(path)
+            
+            if len(filtered) < len(selected):
+                print(f"Skipped {len(selected) - len(filtered)} already indexed files.")
+            
+            if not filtered:
+                QMessageBox.information(self, "Already Done", f"All selected files have already been scanned for {check_key}.")
+                return []
+            return filtered
+        return selected
+
+    def run_indexing(self):
+        if self.worker and self.worker.isRunning(): return
+        files = self.get_files_to_process(check_key='tags')
+        if not files: return
+        
+        self.lock_buttons(True)
+        from workers.indexer import IndexerWorker
+        self.worker = IndexerWorker(files, self.project_path)
+        self.worker.progress_signal.connect(self.update_progress)
+        self.worker.log_signal.connect(self.update_log_status)
+        self.worker.finished_signal.connect(self.worker_finished)
+        self.worker.summary_signal.connect(self.update_visuals_status)
+        self.worker.start()
+
+    def run_transcription(self):
+        if self.worker and self.worker.isRunning(): return
+        files = self.get_files_to_process(check_key='transcript')
+        if not files: return
+        
+        self.lock_buttons(True)
+        from workers.transcriber import TranscriberWorker
+        self.worker = TranscriberWorker(files, self.project_path)
+        self.worker.progress_signal.connect(self.update_progress)
+        self.worker.log_signal.connect(self.update_log_status)
+        self.worker.finished_signal.connect(self.worker_finished)
+        self.worker.file_finished_signal.connect(self.update_audio_status)
+        self.worker.start()
+
+    def run_face_scan(self):
+        if self.worker and self.worker.isRunning(): return
+        files = self.get_files_to_process(check_key='faces')
+        if not files: return
+        
+        self.lock_buttons(True)
+        from workers.face_scanner import FaceScannerWorker
+        self.worker = FaceScannerWorker(files, self.project_path)
+        self.worker.progress_signal.connect(self.update_progress)
+        self.worker.log_signal.connect(self.update_log_status)
+        self.worker.finished_signal.connect(self.worker_finished)
+        self.worker.face_count_signal.connect(self.update_faces_status)
+        self.worker.new_face_signal.connect(self.add_new_face_to_ui)
+        self.worker.start()
+
+==================================================
+FILE: gui\media_tree.py
+==================================================
+# [FILE: gui/media_tree.py]
+import os
+import json
+import time
+from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QAbstractItemView, QHeaderView, QMenu
+from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from PyQt6.QtGui import QColor, QBrush, QDragEnterEvent, QDropEvent
+from config import COLORS
+from core.media_engine import MediaEngine 
+
+class FileMetadataLoader(QThread):
+    # Updated signal signature: added duration string
+    batch_ready = pyqtSignal(list) 
+
+    def __init__(self, file_paths):
+        super().__init__()
+        self.file_paths = file_paths
+        self.is_running = True
+        self.batch_size = 15 
+
+    def run(self):
+        has_ffprobe = MediaEngine.is_available()
+        batch = []
+        for path in self.file_paths:
+            if not self.is_running: break
+            
+            res_str, fps_str, dur_str = "Unknown", "--", "--:--"
+            status = {'visuals': False, 'audio': False, 'faces': False}
+            summary_str = ""
+
+            if has_ffprobe:
+                w, h, fps, dur_sec = MediaEngine.get_metadata(path)
+                if w > 0:
+                    res_str = f"{w}x{h}"
+                    fps_str = f"{fps:.2f}"
+                    
+                    # Format Duration
+                    m, s = divmod(dur_sec, 60)
+                    h_dur, m = divmod(m, 60)
+                    if h_dur > 0:
+                        dur_str = f"{int(h_dur)}:{int(m):02}:{int(s):02}"
+                    else:
+                        dur_str = f"{int(m):02}:{int(s):02}"
+
+            json_path = f"{path}.json"
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        if data.get("tags"): status['visuals'] = True
+                        if data.get("transcript"): status['audio'] = True
+                        if data.get("faces"): status['faces'] = True
+                        summary_str = data.get("summary", "")
+                except: pass
+            
+            # Add dur_str to payload
+            batch.append((path, res_str, fps_str, dur_str, status, summary_str))
+            
+            if len(batch) >= self.batch_size:
+                self.batch_ready.emit(batch)
+                batch = []
+                time.sleep(0.01)
+
+        if batch:
+            self.batch_ready.emit(batch)
+
+    def stop(self):
+        self.is_running = False
+
+class MediaTree(QTreeWidget):
+    files_dropped_signal = pyqtSignal(list)
+    clear_data_signal = pyqtSignal(list, str)
+
+    def __init__(self):
+        super().__init__()
+        # Added DURATION at index 3
+        self.setHeaderLabels(["FILENAME", "RES", "FPS", "DUR", "👁️", "🔊", "👤", "AI SUMMARY", "FULL_PATH"])
+        
+        header = self.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents) # Duration
+        
+        # Updated indices for status icons (shifted by 1)
+        for col in [4, 5, 6]:
+            header.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            header.resizeSection(col, 30)
+            
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        self.setColumnHidden(8, True) # Full path is now index 8
+        
+        self.setAlternatingRowColors(True)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        
+        self.is_updating = False
+        self.itemClicked.connect(self.handle_click)
+        self.loader_thread = None
+        
+        self.setStyleSheet(f"""
+            QTreeWidget {{ background: {COLORS['bg_app']}; border: 1px solid {COLORS['border']}; border-radius: 4px; font-size: 13px; color: #DDD; }}
+            QHeaderView::section {{ background: {COLORS['bg_panel']}; padding: 6px; border: none; border-bottom: 1px solid {COLORS['border']}; color: {COLORS['text_dim']}; font-weight: bold; }}
+            QTreeWidget::item {{ padding: 4px; }}
+            QTreeWidget::item:selected {{ background: {COLORS['selection']}; color: {COLORS['accent']}; border-left: 2px solid {COLORS['accent']}; }}
+        """)
+
+    # ... (Drag/Drop events unchanged) ...
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls(): event.accept()
+        else: event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls(): event.accept()
+        else: event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        if event.mimeData().hasUrls():
+            event.accept()
+            files = [u.toLocalFile() for u in event.mimeData().urls()]
+            self.files_dropped_signal.emit(files)
+        else:
+            super().dropEvent(event)
+
+    def contextMenuEvent(self, event):
+        selected_files = self.get_selected_file_paths()
+        if not selected_files: return
+        menu = QMenu(self)
+        menu.setStyleSheet(f"QMenu {{ background: #252526; color: white; border: 1px solid #444; }} QMenu::item:selected {{ background: {COLORS['accent']}; color: black; }}")
+        
+        act_clear_vis = menu.addAction("Clear Visual Index")
+        act_clear_aud = menu.addAction("Clear Transcription")
+        act_clear_face = menu.addAction("Clear Face Data")
+        
+        action = menu.exec(self.mapToGlobal(event.pos()))
+        if action == act_clear_vis: self.clear_data_signal.emit(selected_files, 'visuals')
+        elif action == act_clear_aud: self.clear_data_signal.emit(selected_files, 'audio')
+        elif action == act_clear_face: self.clear_data_signal.emit(selected_files, 'faces')
+
+    def norm(self, path):
+        return os.path.normpath(path).lower()
+
+    def handle_click(self, item, column):
+        if column == 0 and not self.is_updating:
+            self.is_updating = True
+            new_state = item.checkState(0)
+            self._set_children_state(item, new_state)
+            self.is_updating = False
+
+    def _set_children_state(self, parent_item, state):
+        for i in range(parent_item.childCount()):
+            child = parent_item.child(i)
+            child.setCheckState(0, state)
+            self._set_children_state(child, state)
+
+    def toggle_all(self, state=True):
+        self.is_updating = True
+        root = self.invisibleRootItem()
+        target = Qt.CheckState.Checked if state else Qt.CheckState.Unchecked
+        for i in range(root.childCount()):
+            item = root.child(i)
+            item.setCheckState(0, target)
+            self._set_children_state(item, target)
+        self.is_updating = False
+
+    def add_files_flat(self, file_paths):
+        existing_paths = set(self.get_all_file_paths())
+        new_files = [p for p in file_paths if self.norm(p) not in existing_paths]
+        if not new_files: return
+
+        for path in new_files:
+            item = QTreeWidgetItem(self)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDragEnabled)
+            item.setCheckState(0, Qt.CheckState.Checked)
+            
+            item.setText(0, os.path.basename(path))
+            item.setText(1, "...") 
+            item.setText(2, "...") 
+            item.setText(3, "...") # Duration placeholder
+            item.setText(4, "⬜")
+            item.setText(5, "⬜")
+            item.setText(6, "⬜")
+            item.setText(7, "Waiting for scan...")
+            item.setText(8, path) # Path moved to 8
+        
+        self._start_loader_thread(new_files)
+
+    def _start_loader_thread(self, files):
+        if self.loader_thread and self.loader_thread.isRunning():
+            self.loader_thread.stop()
+            self.loader_thread.wait()
+        
+        self.loader_thread = FileMetadataLoader(files)
+        self.loader_thread.batch_ready.connect(self._process_batch_update)
+        self.loader_thread.start()
+
+    def _process_batch_update(self, batch_data):
+        self.setUpdatesEnabled(False)
+        for data in batch_data:
+            path, res, fps, dur, status, summary = data
+            self._update_item_data_internal(path, res, fps, dur, status, summary)
+        self.setUpdatesEnabled(True)
+
+    def _update_item_data_internal(self, path, res, fps, dur, status, summary):
+        target = self.norm(path)
+        root = self.invisibleRootItem()
+        stack = [root.child(i) for i in range(root.childCount())]
+        while stack:
+            item = stack.pop()
+            if self.norm(item.text(8)) == target:
+                item.setText(1, res)
+                item.setText(2, fps)
+                item.setText(3, dur)
+                item.setText(7, summary)
+                self._set_status_icon(item, 4, status['visuals'])
+                self._set_status_icon(item, 5, status['audio'])
+                self._set_status_icon(item, 6, status['faces'])
+                return
+            for i in range(item.childCount()):
+                stack.append(item.child(i))
+
+    def _set_status_icon(self, item, col, is_done):
+        if is_done:
+            item.setText(col, "✅")
+            item.setForeground(col, QBrush(QColor(COLORS['accent'])))
+        else:
+            item.setText(col, "⬜")
+            item.setForeground(col, QBrush(QColor("#444")))
+
+    def set_processing_icon(self, file_path, data_type):
+        col_map = {'visuals': 4, 'audio': 5, 'faces': 6}
+        if data_type not in col_map: return
+        self.update_item_status(file_path, col_map[data_type], "⏳")
+
+    def mark_visuals_done(self, file_path, summary_text):
+        self.update_item_status(file_path, 4, "✅", summary_text)
+
+    def mark_audio_done(self, file_path):
+        self.update_item_status(file_path, 5, "✅")
+
+    def mark_faces_done(self, file_path):
+        self.update_item_status(file_path, 6, "✅")
+        
+    def reset_status(self, file_path, data_type):
+        col = 4
+        if data_type == 'audio': col = 5
+        elif data_type == 'faces': col = 6
+        self.update_item_status(file_path, col, "⬜")
+
+    def update_item_status(self, file_path, column_index, icon_text, summary_text=None):
+        target_path = self.norm(file_path)
+        root = self.invisibleRootItem()
+        stack = [root.child(i) for i in range(root.childCount())]
+        
+        while stack:
+            it = stack.pop()
+            if self.norm(it.text(8)) == target_path:
+                it.setText(column_index, icon_text)
+                if icon_text == "✅":
+                    it.setForeground(column_index, QBrush(QColor(COLORS['accent'])))
+                elif icon_text == "⏳":
+                    it.setForeground(column_index, QBrush(QColor("#FFEB3B"))) 
+                else:
+                    it.setForeground(column_index, QBrush(QColor("#444")))
+                
+                if summary_text: it.setText(7, summary_text)
+                return
+            for i in range(it.childCount()):
+                stack.append(it.child(i))
+
+    def get_all_file_paths(self):
+        paths = []
+        root = self.invisibleRootItem()
+        stack = [root.child(i) for i in range(root.childCount())]
+        while stack:
+            it = stack.pop()
+            if it.childCount() == 0: paths.append(it.text(8))
+            for i in range(it.childCount()):
+                stack.append(it.child(i))
+        return paths
+    
+    def get_selected_file_paths(self):
+        return [item.text(8) for item in self.selectedItems() if item.childCount() == 0]
+    
+    def get_checked_file_paths(self):
+        paths = []
+        root = self.invisibleRootItem()
+        stack = [root.child(i) for i in range(root.childCount())]
+        while stack:
+            it = stack.pop()
+            if it.childCount() == 0 and it.checkState(0) == Qt.CheckState.Checked:
+                paths.append(it.text(8))
+            for i in range(it.childCount()):
+                stack.append(it.child(i))
+        return paths
+
+==================================================
+FILE: gui\metadata_panel.py
+==================================================
+# [FILE: gui/metadata_panel.py]
+import sys
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit, 
+                             QTextEdit, QPushButton, QHBoxLayout, QMessageBox, QFrame)
+from PyQt6.QtCore import Qt, pyqtSignal
+from config import COLORS
+
+class MetadataPanel(QWidget):
+    save_requested = pyqtSignal(list, str)
+
+    def __init__(self):
+        super().__init__()
+        self.setStyleSheet(f"background: {COLORS['bg_panel']};")
+        self.is_editing = False # State tracker
+        self.setup_ui()
+        self.current_file_path = None
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+
+        # 1. Header with Filename & Edit Toggle
+        header_layout = QHBoxLayout()
+        
+        self.lbl_filename = QLabel("No Selection")
+        self.lbl_filename.setStyleSheet(f"color: {COLORS['accent']}; font-weight: 900; font-size: 13px; letter-spacing: 0.5px;")
+        self.lbl_filename.setWordWrap(True)
+        header_layout.addWidget(self.lbl_filename, stretch=1)
+        
+        self.btn_edit = QPushButton("✎ Edit")
+        self.btn_edit.setFixedSize(60, 25)
+        self.btn_edit.setCheckable(True)
+        self.btn_edit.clicked.connect(self.toggle_edit_mode)
+        self.btn_edit.setStyleSheet(f"""
+            QPushButton {{ background: transparent; border: 1px solid #555; color: #888; border-radius: 4px; font-size: 11px; font-weight: bold; }}
+            QPushButton:checked {{ background: {COLORS['accent']}; color: black; border: none; }}
+            QPushButton:hover {{ border-color: {COLORS['accent']}; color: {COLORS['accent']}; }}
+            QPushButton:checked:hover {{ color: black; }}
+        """)
+        header_layout.addWidget(self.btn_edit)
+        
+        layout.addLayout(header_layout)
+
+        # Divider
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet(f"background: {COLORS['border']}; max-height: 1px;")
+        layout.addWidget(line)
+
+        # 2. Tags Input
+        lbl_tags = QLabel("VISUAL KEYWORDS")
+        lbl_tags.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; margin-top: 5px;")
+        layout.addWidget(lbl_tags)
+
+        self.input_tags = QTextEdit() # Changed to TextEdit for multi-line tags
+        self.input_tags.setPlaceholderText("AI generated keywords will appear here...")
+        self.input_tags.setFixedHeight(80)
+        self.input_tags.setStyleSheet(self._get_input_style(read_only=True))
+        self.input_tags.setReadOnly(True)
+        layout.addWidget(self.input_tags)
+
+        # 3. AI Summary
+        lbl_summary = QLabel("DESCRIPTION / SUMMARY")
+        lbl_summary.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; margin-top: 5px;")
+        layout.addWidget(lbl_summary)
+
+        self.input_summary = QTextEdit()
+        self.input_summary.setPlaceholderText("Detailed description...")
+        self.input_summary.setStyleSheet(self._get_input_style(read_only=True))
+        self.input_summary.setReadOnly(True)
+        layout.addWidget(self.input_summary)
+
+        # 4. Save Button (Hidden by default)
+        self.btn_save = QPushButton("SAVE CHANGES")
+        self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save.clicked.connect(self.handle_save)
+        self.btn_save.setFixedHeight(40)
+        self.btn_save.hide() 
+        self.btn_save.setStyleSheet(f"""
+            QPushButton {{
+                background: {COLORS['accent']}; color: #121212;
+                border: none; border-radius: 4px; font-weight: 800; font-size: 12px;
+                letter-spacing: 0.5px;
+            }}
+            QPushButton:hover {{ background: {COLORS['accent_hover']}; }}
+        """)
+        layout.addWidget(self.btn_save)
+        
+        layout.addStretch()
+        self.clear()
+
+    def _get_input_style(self, read_only=True):
+        if read_only:
+            return f"""
+                QTextEdit {{
+                    background: {COLORS['bg_app']}; color: #CCC;
+                    border: 1px solid transparent; padding: 8px; border-radius: 4px;
+                    font-size: 12px; font-family: 'Segoe UI', sans-serif;
+                }}
+            """
+        else:
+            return f"""
+                QTextEdit {{
+                    background: {COLORS['bg_input']}; color: white;
+                    border: 1px solid {COLORS['border']}; padding: 8px; border-radius: 4px;
+                    font-size: 12px; font-family: 'Segoe UI', sans-serif;
+                }}
+                QTextEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+            """
+
+    def toggle_edit_mode(self, checked):
+        self.is_editing = checked
+        self.input_tags.setReadOnly(not checked)
+        self.input_summary.setReadOnly(not checked)
+        
+        self.input_tags.setStyleSheet(self._get_input_style(not checked))
+        self.input_summary.setStyleSheet(self._get_input_style(not checked))
+        
+        if checked:
+            self.btn_save.show()
+            self.btn_edit.setText("Cancel")
+        else:
+            self.btn_save.hide()
+            self.btn_edit.setText("✎ Edit")
+            # Revert changes if cancelled? For now, we just hide button
+            if self.current_file_path:
+                # Reload data to revert any unsaved typing
+                # We need the main window to re-trigger load, or we store local cache.
+                # For simplicity in V2.1, we assume user saves or loses edits.
+                pass
+
+    def load_data(self, file_path, tags, summary):
+        self.current_file_path = file_path
+        
+        # Reset Edit Mode
+        if self.btn_edit.isChecked():
+            self.btn_edit.setChecked(False)
+            self.toggle_edit_mode(False)
+        
+        name = file_path.split("/")[-1]
+        if "\\" in name: name = name.split("\\")[-1]
+        self.lbl_filename.setText(name.upper())
+        
+        # Format tags nicely
+        tag_str = ", ".join(tags) if tags else "No tags yet."
+        self.input_tags.setText(tag_str)
+        self.input_summary.setText(summary if summary else "No summary available.")
+        
+        self.btn_edit.setEnabled(True)
+
+    def clear(self):
+        self.current_file_path = None
+        self.lbl_filename.setText("NO SELECTION")
+        self.input_tags.clear()
+        self.input_summary.clear()
+        self.btn_edit.setEnabled(False)
+        self.btn_edit.setChecked(False)
+        self.toggle_edit_mode(False)
+
+    def handle_save(self):
+        if not self.current_file_path: return
+        
+        raw_tags = self.input_tags.toPlainText().split(',')
+        clean_tags = [t.strip() for t in raw_tags if t.strip()]
+        summary = self.input_summary.toPlainText()
+        
+        self.save_requested.emit(clean_tags, summary)
+        
+        # Exit edit mode
+        self.btn_edit.setChecked(False)
+        self.toggle_edit_mode(False)
+
+==================================================
+FILE: gui\player_window.py
+==================================================
+import sys
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QHBoxLayout, 
+                             QLabel, QSlider, QStyle, QFrame)
+from PyQt6.QtCore import Qt, QUrl
+from PyQt6.QtGui import QIcon, QAction
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
+
+class PlayerWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("CyneDirector Player")
+        self.resize(1000, 650)
+        self.setStyleSheet("background: #000; color: #FFF;")
+        
+        # --- Media Backend ---
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.media_player.setAudioOutput(self.audio_output)
+        
+        # --- Playback State ---
+        self.is_dragging_slider = False
+        self.playback_rate = 1.0
+        self.frame_duration = 40  # Default to ~25fps (40ms), updates on load
+
+        # --- UI Setup ---
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 1. Video Surface
+        self.video_widget = QVideoWidget()
+        layout.addWidget(self.video_widget)
+        self.media_player.setVideoOutput(self.video_widget)
+        
+        # 2. Controls Container
+        self.controls = QWidget()
+        self.controls.setFixedHeight(90)
+        self.controls.setStyleSheet("background: #1E1E1E; border-top: 1px solid #333;")
+        ctrl_layout = QVBoxLayout(self.controls)
+        ctrl_layout.setContentsMargins(15, 5, 15, 10)
+        
+        # A. Timeline Slider
+        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider.setRange(0, 0)
+        self.slider.sliderMoved.connect(self.set_position)
+        self.slider.sliderPressed.connect(self.on_slider_pressed)
+        self.slider.sliderReleased.connect(self.on_slider_released)
+        self.slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 6px; background: #333; border-radius: 3px; }
+            QSlider::handle:horizontal { background: #00E676; width: 14px; margin: -5px 0; border-radius: 7px; }
+            QSlider::sub-page:horizontal { background: #00E676; border-radius: 3px; }
+        """)
+        ctrl_layout.addWidget(self.slider)
+
+        # B. Buttons Row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(15)
+
+        # Play/Pause Button
+        self.btn_play = QPushButton()
+        self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.btn_play.clicked.connect(self.toggle_play)
+        self.btn_play.setFixedSize(40, 40)
+        self.btn_play.setStyleSheet("border: 1px solid #555; border-radius: 20px; background: #333;")
+        self.btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_row.addWidget(self.btn_play)
+        
+        # Time Label
+        self.lbl_time = QLabel("00:00 / 00:00")
+        self.lbl_time.setStyleSheet("font-family: monospace; font-size: 13px; color: #CCC; font-weight: bold;")
+        btn_row.addWidget(self.lbl_time)
+        
+        # Speed Label (Feedback for JKL)
+        self.lbl_speed = QLabel("1x")
+        self.lbl_speed.setStyleSheet("color: #777; font-size: 11px; margin-left: 10px;")
+        btn_row.addWidget(self.lbl_speed)
+
+        btn_row.addStretch()
+        
+        # Volume Slider
+        vol_icon = QLabel("🔊")
+        btn_row.addWidget(vol_icon)
+        
+        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.vol_slider.setRange(0, 100)
+        self.vol_slider.setValue(70)
+        self.vol_slider.setFixedWidth(100)
+        self.vol_slider.valueChanged.connect(self.audio_output.setVolume) # 0-1.0 float in Qt6, logic handled below
+        self.vol_slider.valueChanged.connect(self.set_volume)
+        self.vol_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #444; }
+            QSlider::handle:horizontal { background: #FFF; width: 10px; margin: -3px 0; border-radius: 5px; }
+            QSlider::sub-page:horizontal { background: #AAA; }
+        """)
+        btn_row.addWidget(self.vol_slider)
+
+        ctrl_layout.addLayout(btn_row)
+        layout.addWidget(self.controls)
+        
+        # --- Signals ---
+        self.media_player.positionChanged.connect(self.position_changed)
+        self.media_player.durationChanged.connect(self.duration_changed)
+        self.media_player.errorOccurred.connect(self.handle_errors)
+        
+        # Initial Volume
+        self.set_volume(70)
+
+    # --- KEYBOARD CONTROLS (The "Pro" Features) ---
+    def keyPressEvent(self, event):
+        key = event.key()
+        
+        if key == Qt.Key.Key_Space:
+            self.toggle_play()
+            
+        elif key == Qt.Key.Key_K: # STOP/PAUSE
+            self.media_player.pause()
+            self.playback_rate = 0
+            self.update_speed_label()
+            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+
+        elif key == Qt.Key.Key_L: # FORWARD (1x -> 2x -> 4x)
+            if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                self.media_player.play()
+                self.playback_rate = 1.0
+            else:
+                if self.playback_rate < 1: self.playback_rate = 1.0
+                else: self.playback_rate = min(self.playback_rate * 2, 8.0)
+            
+            self.media_player.setPlaybackRate(self.playback_rate)
+            self.update_speed_label()
+            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+
+        elif key == Qt.Key.Key_J: # REVERSE (1x -> 2x -> 4x)
+            # NOTE: Reverse playback support depends on codec. 
+            # If standard backend fails, this might just pause or jump.
+            if self.media_player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+                self.media_player.play()
+                self.playback_rate = -1.0
+            else:
+                if self.playback_rate > -1: self.playback_rate = -1.0
+                else: self.playback_rate = max(self.playback_rate * 2, -8.0) # -2, -4...
+            
+            self.media_player.setPlaybackRate(self.playback_rate)
+            self.update_speed_label()
+            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+
+        elif key == Qt.Key.Key_Right: # FRAME STEP FORWARD
+            self.media_player.pause()
+            pos = self.media_player.position()
+            self.media_player.setPosition(pos + self.frame_duration)
+            
+        elif key == Qt.Key.Key_Left: # FRAME STEP BACK
+            self.media_player.pause()
+            pos = self.media_player.position()
+            self.media_player.setPosition(max(0, pos - self.frame_duration))
+
+    def update_speed_label(self):
+        rate = self.media_player.playbackRate()
+        self.lbl_speed.setText(f"{rate}x")
+
+    def load_video(self, file_path, start_time_sec=0):
+        # Reset state
+        self.playback_rate = 1.0
+        self.media_player.setPlaybackRate(1.0)
+        self.update_speed_label()
+
+        source = QUrl.fromLocalFile(file_path)
+        self.media_player.setSource(source)
+        self.media_player.play()
+        self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+        
+        if start_time_sec > 0:
+            self.media_player.setPosition(int(start_time_sec * 1000))
+        
+        self.show()
+        self.raise_()
+        self.activateWindow() # Force focus for keyboard events
+
+    def toggle_play(self):
+        if self.media_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.media_player.pause()
+            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        else:
+            self.media_player.setPlaybackRate(1.0) # Reset speed on play
+            self.media_player.play()
+            self.btn_play.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPause))
+            self.update_speed_label()
+
+    def set_volume(self, value):
+        # Qt6 AudioOutput takes float 0.0 - 1.0
+        self.audio_output.setVolume(value / 100.0)
+
+    # --- Slider & Time Logic ---
+    def on_slider_pressed(self):
+        self.is_dragging_slider = True
+
+    def on_slider_released(self):
+        self.is_dragging_slider = False
+        self.media_player.setPosition(self.slider.value())
+
+    def position_changed(self, position):
+        if not self.is_dragging_slider:
+            self.slider.setValue(position)
+        self.update_time_label(position, self.media_player.duration())
+
+    def duration_changed(self, duration):
+        self.slider.setRange(0, duration)
+        # Approximate frame duration (assuming 25fps if unknown)
+        self.frame_duration = 40 
+
+    def set_position(self, position):
+        self.update_time_label(position, self.media_player.duration())
+
+    def update_time_label(self, current_ms, total_ms):
+        def fmt(ms):
+            seconds = (ms // 1000) % 60
+            minutes = (ms // 60000)
+            return f"{minutes:02}:{seconds:02}"
+        self.lbl_time.setText(f"{fmt(current_ms)} / {fmt(total_ms)}")
+
+    def handle_errors(self):
+        self.btn_play.setEnabled(False)
+        self.lbl_time.setText("Error: Could not load media")
+        print(f"Player Error: {self.media_player.errorString()}")
+
+    def closeEvent(self, event):
+        self.media_player.stop()
+        self.media_player.setSource(QUrl()) # Release file lock
+        event.accept()
+
+==================================================
+FILE: gui\project_dialog.py
+==================================================
+import os
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
+                             QLabel, QFileDialog, QLineEdit, QMessageBox, QFrame)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QCursor
+from config import COLORS, APP_NAME, FILE_EXT
+
+class ProjectDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(f"Welcome to {APP_NAME}")
+        self.setFixedSize(500, 480)
+        
+        # Modern Dark Theme Stylesheet
+        self.setStyleSheet(f"""
+            QDialog {{ 
+                background-color: {COLORS['bg_app']}; 
+                color: {COLORS['text_main']};
+            }}
+            
+            /* LABELS */
+            QLabel.header {{ 
+                font-size: 24px; font-weight: 900; 
+                color: {COLORS['accent']}; letter-spacing: 1.5px;
+                margin-bottom: 5px;
+            }}
+            QLabel.sub-label {{ 
+                color: {COLORS['text_dim']}; 
+                font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;
+                margin-top: 15px;
+            }}
+            
+            /* INPUTS - FIXED CLIPPING */
+            QLineEdit {{ 
+                background-color: {COLORS['bg_input']}; 
+                border: 1px solid {COLORS['border']}; 
+                border-radius: 6px; 
+                padding: 0px 12px; /* No vertical padding to prevent clip */
+                min-height: 40px;  /* Explicit height */
+                color: white; font-size: 13px;
+                selection-background-color: {COLORS['accent']};
+                selection-color: black;
+            }}
+            QLineEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+            
+            /* BUTTONS */
+            QPushButton.primary {{ 
+                background-color: {COLORS['accent']}; 
+                color: #121212; font-weight: 800; font-size: 13px;
+                border-radius: 6px; min-height: 45px; border: none; letter-spacing: 0.5px;
+            }}
+            QPushButton.primary:hover {{ background-color: {COLORS['accent_hover']}; }}
+            
+            QPushButton.secondary {{ 
+                background-color: {COLORS['bg_panel']}; 
+                border: 1px solid {COLORS['border']}; 
+                color: {COLORS['text_main']};
+                border-radius: 6px; padding: 0 15px; font-size: 12px;
+                min-height: 40px;
+            }}
+            QPushButton.secondary:hover {{ border-color: {COLORS['accent']}; color: {COLORS['accent']}; }}
+
+            QPushButton.ghost {{ 
+                background-color: transparent; border: none; 
+                color: {COLORS['text_dim']}; font-weight: 600;
+            }}
+            QPushButton.ghost:hover {{ color: {COLORS['accent']}; text-decoration: none; }}
+        """)
+        
+        self.selected_project_path = None
+        self.project_name = None
+        
+        self.setup_ui()
+        
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(45, 45, 45, 45)
+        
+        # 1. Header
+        title = QLabel(APP_NAME.upper())
+        title.setProperty("class", "header")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        subtitle = QLabel(f"Version 2.0 (Redux)")
+        subtitle.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; margin-bottom: 20px;")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(subtitle)
+        
+        # 2. Project Name
+        lbl_name = QLabel("Project Name")
+        lbl_name.setProperty("class", "sub-label")
+        layout.addWidget(lbl_name)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("e.g. Nike_Summer_Campaign")
+        layout.addWidget(self.name_input)
+
+        # 3. Location
+        lbl_loc = QLabel("Location")
+        lbl_loc.setProperty("class", "sub-label")
+        layout.addWidget(lbl_loc)
+
+        loc_row = QHBoxLayout()
+        loc_row.setSpacing(10)
+        
+        self.loc_input = QLineEdit()
+        self.loc_input.setReadOnly(True)
+        self.loc_input.setPlaceholderText("Select folder...")
+        loc_row.addWidget(self.loc_input)
+        
+        btn_browse = QPushButton("Browse")
+        btn_browse.setProperty("class", "secondary")
+        btn_browse.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_browse.clicked.connect(self.browse_location)
+        loc_row.addWidget(btn_browse)
+        
+        layout.addLayout(loc_row)
+        
+        layout.addSpacing(25) 
+
+        # 4. Create Button
+        self.btn_create = QPushButton("CREATE PROJECT")
+        self.btn_create.setProperty("class", "primary")
+        self.btn_create.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_create.clicked.connect(self.create_project)
+        layout.addWidget(self.btn_create)
+
+        # 5. Divider
+        div_layout = QHBoxLayout()
+        div_layout.setContentsMargins(0, 15, 0, 15)
+        
+        line1 = QFrame()
+        line1.setFrameShape(QFrame.Shape.HLine)
+        line1.setStyleSheet(f"background: {COLORS['border']}; max-height: 1px;")
+        
+        lbl_or = QLabel("OR")
+        lbl_or.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; padding: 0 10px;")
+        
+        line2 = QFrame()
+        line2.setFrameShape(QFrame.Shape.HLine)
+        line2.setStyleSheet(f"background: {COLORS['border']}; max-height: 1px;")
+        
+        div_layout.addWidget(line1)
+        div_layout.addWidget(lbl_or)
+        div_layout.addWidget(line2)
+        layout.addLayout(div_layout)
+
+        # 6. Open Existing
+        btn_open = QPushButton("Open Existing Project")
+        btn_open.setProperty("class", "ghost")
+        btn_open.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        btn_open.clicked.connect(self.open_project)
+        layout.addWidget(btn_open)
+
+        layout.addStretch()
+
+    def browse_location(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Project Folder")
+        if folder:
+            self.loc_input.setText(folder)
+
+    def create_project(self):
+        folder = self.loc_input.text()
+        name = self.name_input.text().strip()
+        
+        if not folder or not name:
+            QMessageBox.warning(self, "Missing Info", "Please enter a project name and select a folder.")
+            return
+            
+        project_file = os.path.join(folder, f"{name}{FILE_EXT}")
+        if os.path.exists(project_file):
+            QMessageBox.warning(self, "Error", "A project with this name already exists in that folder.")
+            return
+
+        try:
+            with open(project_file, 'w') as f:
+                f.write('{"version": "2.0", "files": []}')
+            
+            self.selected_project_path = folder
+            self.project_name = name
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+
+    def open_project(self):
+        fpath, _ = QFileDialog.getOpenFileName(self, "Open Project", "", f"Cyne Project (*{FILE_EXT})")
+        if fpath:
+            self.selected_project_path = os.path.dirname(fpath)
+            self.project_name = os.path.basename(fpath).replace(FILE_EXT, "")
+            self.accept()
+
+==================================================
+FILE: gui\search_tab.py
+==================================================
+import os
+import cv2
+import subprocess 
+import sys
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QListWidget, 
+                             QListWidgetItem, QLabel, QHBoxLayout, QPushButton,
+                             QAbstractItemView, QProgressBar, QFrame)
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QMimeData, QUrl
+from PyQt6.QtGui import QPixmap, QImage, QDrag, QCursor, QIcon
+from config import COLORS
+from core.search_engine import SearchEngine
+from gui.player_window import PlayerWindow
+
+# --- CUSTOM DRAGGABLE LIST (Unchanged) ---
+class DraggableListWidget(QListWidget):
+    def __init__(self):
+        super().__init__()
+        self.setDragEnabled(True)
+        self.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+    def startDrag(self, supportedActions):
+        item = self.currentItem()
+        if not item: return
+        file_path = item.data(Qt.ItemDataRole.UserRole)
+        if not file_path: return
+
+        mime_data = QMimeData()
+        url = QUrl.fromLocalFile(file_path)
+        mime_data.setUrls([url])
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+        drag.exec(Qt.DropAction.CopyAction)
+
+# --- THUMBNAIL LOADER (Unchanged) ---
+class ThumbnailLoader(QThread):
+    thumb_ready = pyqtSignal(QListWidgetItem, QImage)
+
+    def __init__(self, items_to_load):
+        super().__init__()
+        self.items = items_to_load
+        self.is_running = True
+
+    def run(self):
+        for item, path, ts in self.items:
+            if not self.is_running: break
+            try:
+                cap = cv2.VideoCapture(path)
+                if ts > 0:
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    if fps > 0: cap.set(cv2.CAP_PROP_POS_FRAMES, int(ts * fps))
+                
+                ret, frame = cap.read()
+                cap.release()
+                
+                if ret:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w, c = frame.shape
+                    # Optimize: Resize in thread
+                    q_img_full = QImage(frame.data, w, h, c*w, QImage.Format.Format_RGB888)
+                    q_thumb = q_img_full.scaled(120, 68, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    self.thumb_ready.emit(item, q_thumb.copy())
+            except: pass
+
+    def stop(self):
+        self.is_running = False
+
+class SearchTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.project_path = None
+        self.player_window = None
+        self.engine = None
+        self.thumb_loader = None
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(15)
+        
+        # Header
+        lbl = QLabel("SMART B-ROLL FINDER")
+        lbl.setStyleSheet(f"color: {COLORS['accent']}; font-size: 18px; font-weight: 900; letter-spacing: 1px;")
+        layout.addWidget(lbl)
+        
+        # Search Input
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("Search visuals (e.g. 'Golden hour', 'Running') or dialogue...")
+        self.search_bar.returnPressed.connect(self.run_search)
+        self.search_bar.setFixedHeight(45)
+        self.search_bar.setStyleSheet(f"""
+            QLineEdit {{ 
+                padding: 0 15px; font-size: 14px; border-radius: 6px; 
+                background: #252526; border: 1px solid #444; color: white;
+            }}
+            QLineEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+        """)
+        layout.addWidget(self.search_bar)
+        
+        # Info / Status
+        self.info_lbl = QLabel("Enter keywords to find footage.")
+        self.info_lbl.setStyleSheet("color: #777; font-size: 12px; font-weight: bold;")
+        layout.addWidget(self.info_lbl)
+        
+        # Results List
+        self.results_list = DraggableListWidget()
+        self.results_list.setStyleSheet(f"""
+            QListWidget {{ background: #181818; border: 1px solid #333; border-radius: 6px; outline: none; }}
+            QListWidget::item {{ border-bottom: 1px solid #2A2A2A; padding: 8px; }}
+            QListWidget::item:hover {{ background: #222; }}
+            QListWidget::item:selected {{ background: #2A2A2A; border: 1px solid {COLORS['accent']}; }}
+        """)
+        layout.addWidget(self.results_list)
+
+    def set_project_path(self, path):
+        self.project_path = path
+        if self.project_path:
+            self.engine = SearchEngine(self.project_path)
+
+    def run_search(self):
+        query = self.search_bar.text()
+        if not query or not self.engine: return
+        
+        if self.thumb_loader and self.thumb_loader.isRunning():
+            self.thumb_loader.stop()
+            self.thumb_loader.wait()
+
+        self.results_list.clear()
+        self.info_lbl.setText("Thinking...")
+        self.info_lbl.repaint()
+        
+        # --- PERFORM SEARCH ---
+        results = self.engine.search(query)
+        self.info_lbl.setText(f"Found {len(results)} matches for '{query}' (Drag to Premiere to import)")
+        
+        load_queue = []
+        for res in results:
+            item = self.add_result_item(res)
+            load_queue.append((item, res['path'], res.get('timestamp', 0)))
+
+        # Start loading thumbnails in background
+        self.thumb_loader = ThumbnailLoader(load_queue)
+        self.thumb_loader.thumb_ready.connect(self.update_thumbnail)
+        self.thumb_loader.start()
+
+    def add_result_item(self, res):
+        item = QListWidgetItem(self.results_list)
+        item.setSizeHint(QSize(0, 90)) # Slightly taller for better layout
+        item.setData(Qt.ItemDataRole.UserRole, res['path'])
+        
+        widget = QWidget()
+        row = QHBoxLayout(widget)
+        row.setContentsMargins(5, 5, 5, 5)
+        row.setSpacing(15)
+        
+        # 1. Thumbnail Placeholder
+        thumb_lbl = QLabel()
+        thumb_lbl.setFixedSize(120, 68)
+        thumb_lbl.setStyleSheet("background: #111; border: 1px solid #333; color: #444; font-size: 10px;")
+        thumb_lbl.setText("Loading...")
+        thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row.addWidget(thumb_lbl)
+        
+        item.thumb_widget = thumb_lbl 
+        
+        # 2. Metadata Column
+        meta_col = QVBoxLayout()
+        meta_col.setSpacing(4)
+        
+        # A. Filename
+        filename = os.path.basename(res['path'])
+        lbl_name = QLabel(filename)
+        lbl_name.setStyleSheet("font-weight: bold; font-size: 13px; color: #E0E0E0;")
+        meta_col.addWidget(lbl_name)
+        
+        # B. Match Context
+        type_color = COLORS['accent'] # Default Purple
+        if "DIALOGUE" in res['match_type']: type_color = "#FFD700" # Gold
+        elif "FILENAME" in res['match_type']: type_color = "#2196F3" # Blue
+        elif "CAST" in res['match_type']: type_color = "#4CAF50" # Green
+            
+        lbl_ctx = QLabel(f"<span style='color:{type_color}; font-weight:800'>[{res['match_type']}]</span> {res['context']}")
+        lbl_ctx.setStyleSheet("color: #999; font-size: 11px;")
+        meta_col.addWidget(lbl_ctx)
+
+        # C. Confidence Badge (NEW!)
+        score = res.get('score', 0)
+        badge_color = "#444"
+        if score > 80: badge_color = "#2E7D32" # Dark Green
+        elif score > 50: badge_color = "#F57F17" # Dark Orange
+        
+        lbl_score = QLabel(f" Confidence: {int(score)}% ")
+        lbl_score.setFixedSize(100, 16)
+        lbl_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_score.setStyleSheet(f"""
+            background-color: {badge_color}; color: white; 
+            border-radius: 3px; font-size: 9px; font-weight: bold;
+        """)
+        meta_col.addWidget(lbl_score)
+        
+        row.addLayout(meta_col)
+        row.addStretch()
+        
+        # 3. Action Buttons Column
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(5)
+        
+        ts = res.get('timestamp', 0)
+        btn_text = f"▶ {int(ts)}s" if ts > 0 else "▶ PLAY"
+        
+        # Play Button
+        btn_play = QPushButton(btn_text)
+        btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_play.clicked.connect(lambda: self.open_file(res['path'], ts))
+        btn_play.setFixedSize(70, 28)
+        btn_play.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; color: {COLORS['accent']}; 
+                border: 1px solid {COLORS['accent']}; border-radius: 4px; font-weight: bold; font-size: 11px;
+            }}
+            QPushButton:hover {{ background: {COLORS['accent']}; color: black; }}
+        """)
+        btn_col.addWidget(btn_play)
+        
+        # Reveal Button
+        btn_explore = QPushButton("📂")
+        btn_explore.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_explore.setToolTip("Show in Explorer")
+        btn_explore.clicked.connect(lambda: self.show_in_explorer(res['path']))
+        btn_explore.setFixedSize(70, 28)
+        btn_explore.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #444; border-radius: 4px; color: #AAA; }
+            QPushButton:hover { border-color: #888; color: white; }
+        """)
+        btn_col.addWidget(btn_explore)
+
+        row.addLayout(btn_col)
+        
+        self.results_list.setItemWidget(item, widget)
+        return item
+
+    def update_thumbnail(self, item, q_image):
+        if hasattr(item, 'thumb_widget'):
+            item.thumb_widget.setPixmap(QPixmap.fromImage(q_image))
+            item.thumb_widget.setText("")
+
+    def open_file(self, path, timestamp=0):
+        if not self.player_window:
+            self.player_window = PlayerWindow()
+        self.player_window.load_video(path, timestamp)
+
+    def show_in_explorer(self, path):
+        path = os.path.normpath(path)
+        if sys.platform == 'win32':
+            subprocess.Popen(f'explorer /select,"{path}"')
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', '-R', path])
+        else:
+            subprocess.Popen(['xdg-open', os.path.dirname(path)])
+
+==================================================
+FILE: workers\face_scanner.py
+==================================================
+import os
+import cv2
+import torch
+import numpy as np
+from PIL import Image
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtGui import QImage
+from core.face_db import FaceDB
+from core.database import Database
+from core.ai_models import AIBackend
+
+# Safe Import for Facenet
+try:
+    from facenet_pytorch import MTCNN, InceptionResnetV1
+    HAS_FACENET = True
+except ImportError:
+    HAS_FACENET = False
+
+class FaceScannerWorker(QThread):
+    log_signal = pyqtSignal(str)
+    progress_signal = pyqtSignal(int)
+    new_face_signal = pyqtSignal(str, str, object) 
+    face_count_signal = pyqtSignal(str, int)       
+    finished_signal = pyqtSignal()
+
+    def __init__(self, file_paths, project_path):
+        super().__init__()
+        self.file_paths = file_paths
+        self.project_path = project_path
+        self.is_running = True
+        
+        # We now use the FaceDB class for thread-safe matching
+        self.face_db = FaceDB(project_path)
+        self.db = Database(project_path)
+        
+        self.match_threshold = 0.6
+
+    def run(self):
+        if not HAS_FACENET:
+            self.log_signal.emit("❌ CRITICAL: 'facenet-pytorch' missing.")
+            self.log_signal.emit("   ➜ Run: pip install facenet-pytorch")
+            self.finished_signal.emit()
+            return
+
+        # 1. SETUP AI MODELS
+        device = AIBackend().device
+        self.log_signal.emit(f"🚀 Loading Face Models on {device.upper()}...")
+
+        try:
+            # MTCNN for Detection (keep_all=True finds all faces)
+            mtcnn = MTCNN(keep_all=True, device=device, min_face_size=40)
+            
+            # InceptionResnetV1 for Embeddings (pretrained on vggface2)
+            resnet = InceptionResnetV1(pretrained='vggface2').eval().to(device)
+        except Exception as e:
+            self.log_signal.emit(f"Model Load Error: {e}")
+            self.finished_signal.emit()
+            return
+
+        # 2. PREPARE WORKLOAD
+        total_files = len(self.file_paths)
+        
+        for idx, video_path in enumerate(self.file_paths):
+            if not self.is_running: break
+            
+            filename = os.path.basename(video_path)
+            self.log_signal.emit(f"Scanning: {filename}")
+            
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened(): continue
+
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            # Optimization: Scan 1 frame every 1.5 seconds
+            step = int(fps * 1.5) if fps > 0 else 30
+            
+            unique_faces_in_file = set()
+            
+            for frame_num in range(0, total_frames, step):
+                if not self.is_running: break
+                
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, frame = cap.read()
+                if not ret: break
+
+                # Convert to RGB (PIL) for Facenet
+                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(img_rgb)
+
+                try:
+                    # A. DETECT FACES
+                    boxes, _ = mtcnn.detect(pil_img)
+                    
+                    if boxes is not None:
+                        # B. EXTRACT TENSORS
+                        face_tensors = mtcnn.extract(pil_img, boxes, save_path=None)
+                        
+                        if face_tensors is not None:
+                            # C. GENERATE EMBEDDINGS
+                            face_tensors = face_tensors.to(device)
+                            with torch.no_grad():
+                                embeddings = resnet(face_tensors).detach().cpu().numpy()
+
+                            # D. COMPARE & IDENTIFY
+                            for i, embedding in enumerate(embeddings):
+                                box = boxes[i]
+                                
+                                # --- UPDATED LOGIC: Delegate math to FaceDB ---
+                                # This prevents the list-subtraction crash and handles locking
+                                match_id, dist = self.face_db.find_match(embedding, self.match_threshold)
+
+                                # Logic: New Person or Known?
+                                if match_id is None:
+                                    match_id = self.face_db.get_next_id()
+                                    self.face_db.add_face(match_id, embedding)
+                                    
+                                    # Generate Thumbnail from Original Image
+                                    x1, y1, x2, y2 = [int(b) for b in box]
+                                    
+                                    # Clamp to image bounds
+                                    h_img, w_img = img_rgb.shape[:2]
+                                    x1, y1 = max(0, x1), max(0, y1)
+                                    x2, y2 = min(w_img, x2), min(h_img, y2)
+                                    
+                                    if x2 > x1 and y2 > y1:
+                                        face_crop = img_rgb[y1:y2, x1:x2]
+                                        face_crop = np.ascontiguousarray(face_crop)
+                                        
+                                        # Save thumbnail to disk
+                                        thumb_path = os.path.join(self.face_db.db_dir, f"{match_id}.jpg")
+                                        cv2.imwrite(thumb_path, cv2.cvtColor(face_crop, cv2.COLOR_RGB2BGR))
+                                        
+                                        # Send to UI
+                                        h_f, w_f, ch_f = face_crop.shape
+                                        bpl = ch_f * w_f
+                                        q_img = QImage(face_crop.data, w_f, h_f, bpl, QImage.Format.Format_RGB888).copy()
+                                        self.new_face_signal.emit(match_id, match_id, q_img)
+
+                                unique_faces_in_file.add(match_id)
+
+                except Exception as e:
+                    pass # Skip frame on error
+
+            cap.release()
+
+            # Save results for this file
+            if unique_faces_in_file:
+                found_ids = list(unique_faces_in_file)
+                self.db.update_metadata_key(video_path, "faces", found_ids)
+                self.face_count_signal.emit(video_path, len(unique_faces_in_file))
+            
+            # Global Progress
+            global_prog = int(((idx + 1) / total_files) * 100)
+            self.progress_signal.emit(global_prog)
+
+        self.log_signal.emit("Face Scan Complete.")
+        self.finished_signal.emit()
+
+    def stop(self):
+        self.is_running = False
+
+==================================================
+FILE: workers\importer.py
+==================================================
+# [FILE: workers/importer.py]
+import os
+from PyQt6.QtCore import QThread, pyqtSignal
+
+class FolderImportWorker(QThread):
+    progress_signal = pyqtSignal(str) # Emits current folder name being scanned
+    finished_signal = pyqtSignal(list) # Emits the full list of found video files
+
+    def __init__(self, folder_path):
+        super().__init__()
+        self.folder_path = folder_path
+        # Extensions to look for
+        self.valid_exts = {'.mp4', '.mov', '.mxf', '.braw', '.avi'}
+
+    def run(self):
+        found_files = []
+        
+        # Walk the directory tree
+        for root, dirs, files in os.walk(self.folder_path):
+            # Emit progress (just the folder name to keep UI clean)
+            self.progress_signal.emit(f"Scanning: {os.path.basename(root)}")
+            
+            for file in files:
+                if os.path.splitext(file)[1].lower() in self.valid_exts:
+                    full_path = os.path.join(root, file)
+                    found_files.append(full_path)
+        
+        self.finished_signal.emit(found_files)
+
+==================================================
+FILE: workers\indexer.py
+==================================================
+# [FILE: workers/indexer.py]
+from PyQt6.QtCore import QThread, pyqtSignal
+import cv2
+import torch
+import numpy as np
+from PIL import Image
+from core.ai_models import AIBackend
+from core.database import Database
+from core.tags import get_tag_bank
+from collections import defaultdict
+
+class IndexerWorker(QThread):
+    log_signal = pyqtSignal(str)       
+    progress_signal = pyqtSignal(int)      
+    finished_signal = pyqtSignal()
+    summary_signal = pyqtSignal(str, str)  
+    
+    def __init__(self, file_paths, project_path):
+        super().__init__()
+        self.file_paths = file_paths
+        self.project_path = project_path
+        self.is_running = True
+        self.batch_size = 64 
+        
+        # --- Logic Settings ---
+        self.scene_threshold = 0.60  # Sensitivity to scene changes (Lower = more sensitive)
+        self.min_interval = 1.0      # Minimum time between scanning frames
+        self.max_interval = 15.0     # <--- FIXED: Restored missing attribute
+        self.blur_threshold = 100.0  # Frames below this score are considered "Motion Blurs" and ignored
+
+    def calculate_histogram(self, image):
+        """Creates a color fingerprint for the frame to detect cuts/motion."""
+        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+        hist = cv2.calcHist([hsv], [0, 1], None, [50, 60], [0, 180, 0, 256])
+        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
+        return hist
+
+    def calculate_sharpness(self, image):
+        """
+        Returns a score representing how focused the image is.
+        Low score (<100) usually means fast camera movement (Blur).
+        """
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+    def run(self):
+        self.progress_signal.emit(1)
+        self.log_signal.emit("Initializing Smart-Action AI (Blur-Gate Enabled)...")
+        
+        ai = AIBackend()
+        db = Database(self.project_path)
+        
+        try:
+            # Load BOTH Models (CLIP for tags, BLIP-2 for descriptions)
+            clip_model, clip_processor = ai.load_clip()
+            blip_model, blip_processor = ai.load_blip()
+        except Exception as e:
+            self.log_signal.emit(f"AI Load Error: {e}")
+            self.finished_signal.emit()
+            return
+            
+        tag_list = get_tag_bank()
+        total_files = len(self.file_paths)
+        
+        for idx, video_path in enumerate(self.file_paths):
+            if not self.is_running: break
+            
+            self.log_signal.emit(f"Deep Analysis: {video_path}")
+            
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened(): continue
+            
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps <= 0: fps = 24.0
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            # --- SCENE CONTAINER ---
+            # We store "Candidate Frames" for each distinct scene found in the clip
+            # Structure: [ {'best_frame': img, 'score': 0.0}, ... ]
+            detected_scenes = []
+            
+            # Current scene tracker
+            current_scene = {'best_frame': None, 'score': -1.0}
+            
+            # Batching for CLIP (Tags)
+            frames_batch = []
+            timestamps_batch = []
+            tag_scores = defaultdict(float)
+            
+            prev_hist = None
+            last_indexed_time = -self.max_interval
+            
+            # Scan 3 times per second (balance between speed and accuracy)
+            scan_step = int(fps / 3) if fps > 10 else 1
+            
+            for frame_num in range(0, total_frames, scan_step):
+                if not self.is_running: break
+                
+                # UI Progress
+                if frame_num % 50 == 0:
+                    current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
+                    self.progress_signal.emit(current_percent)
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, frame = cap.read()
+                if not ret: break
+                
+                current_time = frame_num / fps
+                curr_hist = self.calculate_histogram(frame)
+                sharpness = self.calculate_sharpness(frame)
+
+                # --- 1. DETECT SCENE CUTS ---
+                similarity = 1.0
+                if prev_hist is not None:
+                    similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
+                
+                # If similarity drops drastically, we entered a new "Scene" (Subject 2?)
+                if similarity < self.scene_threshold:
+                    # Save the previous scene's best frame if it was good
+                    if current_scene['best_frame'] is not None:
+                        detected_scenes.append(current_scene)
+                    # Reset tracker for new scene
+                    current_scene = {'best_frame': None, 'score': -1.0}
+
+                # --- 2. FIND BEST ACTION FRAME (With Blur Gate) ---
+                # We want: HIGH change (low similarity) AND HIGH sharpness
+                # If camera moves fast -> Sharpness drops -> Score drops -> Ignored.
+                if prev_hist is not None:
+                    motion_score = (1.0 - similarity) # 0.0 (still) to 1.0 (big move)
+                    
+                    # Logic: 
+                    # If image is blurry (<100), penalty is massive.
+                    # If image is sharp, we reward motion.
+                    if sharpness > self.blur_threshold:
+                        # Composite Score: Motion * Sharpness
+                        quality_score = motion_score * sharpness
+                        
+                        if quality_score > current_scene['score']:
+                            current_scene['score'] = quality_score
+                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                            current_scene['best_frame'] = Image.fromarray(rgb)
+
+                # --- 3. INDEXING FOR TAGS (Standard) ---
+                time_since_last = current_time - last_indexed_time
+                should_index = False
+                
+                if time_since_last >= self.max_interval:
+                    should_index = True
+                elif time_since_last >= self.min_interval:
+                     # Index if there's enough change, but not blurry garbage
+                     if similarity < 0.85 and sharpness > self.blur_threshold:
+                         should_index = True
+
+                if should_index:
+                    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    pil_img = Image.fromarray(img_rgb)
+                    
+                    frames_batch.append(pil_img)
+                    timestamps_batch.append(current_time)
+                    last_indexed_time = current_time
+
+                    if len(frames_batch) >= self.batch_size:
+                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
+                        frames_batch = []
+                        timestamps_batch = []
+                        
+                prev_hist = curr_hist
+
+            # End of file: Save the last active scene
+            if current_scene['best_frame'] is not None:
+                detected_scenes.append(current_scene)
+
+            # Process remaining CLIP batch
+            if frames_batch:
+                self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
+            
+            cap.release()
+            
+            # --- PHASE 2: GENERATE MULTI-SCENE DESCRIPTION (BLIP-2) ---
+            descriptions = []
+            
+            # Limit to max 3 scenes per clip to prevent spamming
+            final_scenes = detected_scenes[:3]
+            if not final_scenes and total_frames > 0:
+                # Fallback: If no "Action" passed the blur gate, just grab the middle frame
+                # This happens for very still shots (interviews).
+                pass # We rely on CLIP tags in this case
+            
+            for i, scene in enumerate(final_scenes):
+                try:
+                    inputs = blip_processor(images=scene['best_frame'], return_tensors="pt").to(ai.device, dtype=ai.dtype)
+                    with torch.no_grad():
+                        out_ids = blip_model.generate(**inputs, max_new_tokens=40) # Short sentence
+                        desc = blip_processor.batch_decode(out_ids, skip_special_tokens=True)[0].strip()
+                        if desc:
+                            # Cleanup punctuation
+                            if desc.endswith('.'): desc = desc[:-1]
+                            descriptions.append(desc)
+                except Exception as e:
+                    print(f"BLIP Scene {i} Error: {e}")
+
+            # Join sentences: "A woman running. A man drinking coffee."
+            if descriptions:
+                # Dedup sentences (in case the scene split was redundant)
+                unique_desc = list(dict.fromkeys(descriptions))
+                full_description = ". ".join([d[0].upper() + d[1:] for d in unique_desc]) + "."
+            else:
+                full_description = "Static shot or unclear action."
+
+            # --- PHASE 3: FINALIZE TAGS (CLIP) ---
+            sorted_tags = sorted(tag_scores.items(), key=lambda item: item[1], reverse=True)
+            final_tags = [tag for tag, score in sorted_tags[:25] if score > 0.05]
+            if not final_tags and sorted_tags:
+                final_tags = [t[0] for t in sorted_tags[:5]]
+
+            # Merge with Transcript
+            current_meta = db.get_video_metadata(video_path)
+            transcript_data = current_meta.get("transcript", [])
+            
+            final_summary = full_description
+            if transcript_data:
+                 full_text = " ".join([t['text'] for t in transcript_data])
+                 words = full_text.split()[:15]
+                 final_summary += f" | Audio: \"{' '.join(words)}...\""
+
+            db.save_tags(video_path, final_tags, final_summary)
+            self.summary_signal.emit(video_path, final_summary)
+        
+        ai.unload_models()
+        self.progress_signal.emit(100)
+        self.finished_signal.emit()
+
+    def process_batch(self, images, timestamps, ai, db, video_path, model, processor, tag_list, tag_scores):
+        try:
+            inputs = processor(images=images, return_tensors="pt", padding=True).to(ai.device)
+            with torch.no_grad():
+                img_features = model.get_image_features(**inputs)
+                img_features /= img_features.norm(p=2, dim=-1, keepdim=True)
+                
+                vectors_list = img_features.cpu().numpy().tolist()
+                db.add_visual_embeddings(video_path, vectors_list, timestamps)
+                
+                similarity = (100.0 * img_features @ ai.tag_embeddings.T).softmax(dim=-1)
+                values, indices = similarity.topk(15, dim=-1)
+                
+                vals_np = values.cpu().numpy()
+                inds_np = indices.cpu().numpy()
+                
+                for i in range(len(images)):    
+                    for rank in range(15):
+                        tag_idx = inds_np[i][rank]
+                        confidence = vals_np[i][rank]
+                        tag_name = tag_list[tag_idx]
+                        tag_scores[tag_name] += confidence
+        except Exception as e:
+            print(f"Batch Error: {e}")
+
+    def stop(self):
+        self.is_running = False
+
+==================================================
+FILE: workers\transcriber.py
+==================================================
+import os
+import json
+from PyQt6.QtCore import QThread, pyqtSignal
+from core.ai_models import AIBackend
+from core.database import Database
+
+class TranscriberWorker(QThread):
+    # These signals are REQUIRED by your main_window.py
+    log_signal = pyqtSignal(str)
+    progress_signal = pyqtSignal(int)
+    finished_signal = pyqtSignal()
+    file_finished_signal = pyqtSignal(str)
+
+    def __init__(self, file_paths, project_path):
+        super().__init__()
+        self.file_paths = file_paths
+        self.project_path = project_path
+        self.is_running = True
+
+    def run(self):
+        self.log_signal.emit("Initializing Whisper AI...")
+        
+        # 1. Reuse the model already loaded in memory (Saves VRAM)
+        ai = AIBackend()
+        db = Database(self.project_path)
+        
+        try:
+            # This loads the optimized 'faster-whisper' model
+            model = ai.load_whisper()
+        except Exception as e:
+            self.log_signal.emit(f"CRITICAL: Audio Model Failed - {e}")
+            self.finished_signal.emit()
+            return
+
+        total_files = len(self.file_paths)
+        
+        for idx, video_path in enumerate(self.file_paths):
+            if not self.is_running: break
+            
+            filename = os.path.basename(video_path)
+            self.log_signal.emit(f"Transcribing: {filename}")
+            
+            try:
+                # 2. Transcribe using faster-whisper
+                # This is much faster than the standard 'whisper' library
+                segments, info = model.transcribe(video_path, beam_size=5)
+                
+                segment_list = []
+                full_text = ""
+                
+                # Convert generator to list
+                for segment in segments:
+                    if not self.is_running: break
+                    segment_list.append({
+                        "start": segment.start,
+                        "end": segment.end,
+                        "text": segment.text.strip()
+                    })
+                    full_text += segment.text + " "
+
+                if not self.is_running: break
+
+                # 3. Save to Database
+                db.save_transcript(video_path, segment_list)
+                
+                # Update Summary
+                current_meta = db.get_video_metadata(video_path)
+                if "summary" not in current_meta or not current_meta["summary"]:
+                    preview = (full_text[:100] + "...") if len(full_text) > 100 else full_text
+                    db.save_summary(video_path, f"Audio: {preview}")
+
+                # Tell UI this file is done (Adds Green Checkmark)
+                self.file_finished_signal.emit(video_path)
+
+            except Exception as e:
+                self.log_signal.emit(f"Error on {filename}: {str(e)}")
+
+            # Update progress bar
+            progress = int(((idx + 1) / total_files) * 100)
+            self.progress_signal.emit(progress)
+
+        self.log_signal.emit("Transcription Complete.")
+        self.finished_signal.emit()
+
+    def stop(self):
+        self.is_running = False

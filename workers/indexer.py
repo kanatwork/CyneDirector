@@ -1,3 +1,4 @@
+# [FILE: workers/indexer.py]
 import os
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
@@ -20,16 +21,14 @@ class IndexerWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
-        self.batch_size = 64 
+        self.batch_size = 32 # Reduced slightly to be safe on VRAM
         
         # --- Logic Settings ---
-        self.scene_threshold = 0.60  # Sensitivity to scene changes (Lower = more sensitive)
+        self.scene_threshold = 0.60  # Sensitivity to scene changes
         self.min_interval = 1.0      # Minimum time between scanning frames
         self.max_interval = 15.0     # Max time before forcing a scan
         
-        # --- FIX 1: LOWER BLUR THRESHOLD ---
-        # Was 100.0. Lowered to 50.0 to support cinematic/log footage 
-        # which often has lower variance/sharpness scores.
+        # Lower blur threshold for cinematic footage
         self.blur_threshold = 50.0  
 
     def calculate_histogram(self, image):
@@ -40,12 +39,21 @@ class IndexerWorker(QThread):
         return hist
 
     def calculate_sharpness(self, image):
-        """
-        Returns a score representing how focused the image is.
-        Low score usually means fast camera movement (Blur).
-        """
+        """Returns a score representing how focused the image is."""
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         return cv2.Laplacian(gray, cv2.CV_64F).var()
+
+    def _resize_for_ai(self, pil_img, target_size=384):
+        """
+        Resizes image for AI consumption to save RAM.
+        CLIP uses 224/336, BLIP uses ~384. 
+        Keeping full 4K images in RAM lists causes crashes.
+        """
+        w, h = pil_img.size
+        scale = target_size / max(w, h)
+        if scale >= 1: return pil_img
+        new_w, new_h = int(w * scale), int(h * scale)
+        return pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     def run(self):
         self.progress_signal.emit(1)
@@ -55,7 +63,7 @@ class IndexerWorker(QThread):
         db = Database(self.project_path)
         
         try:
-            # Load BOTH Models (CLIP for tags, BLIP-2 for descriptions)
+            # Load Models
             clip_model, clip_processor = ai.load_clip()
             blip_model, blip_processor = ai.load_blip()
         except Exception as e:
@@ -79,14 +87,10 @@ class IndexerWorker(QThread):
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
             # --- SCENE CONTAINER ---
-            # We store "Candidate Frames" for each distinct scene found in the clip
-            # Structure: [ {'best_frame': img, 'score': 0.0}, ... ]
             detected_scenes = []
-            
-            # Current scene tracker
             current_scene = {'best_frame': None, 'score': -1.0}
             
-            # Batching for CLIP (Tags)
+            # Batching for CLIP
             frames_batch = []
             timestamps_batch = []
             tag_scores = defaultdict(float)
@@ -94,14 +98,14 @@ class IndexerWorker(QThread):
             prev_hist = None
             last_indexed_time = -self.max_interval
             
-            # Scan 3 times per second (balance between speed and accuracy)
+            # Scan Step
             scan_step = int(fps / 3) if fps > 10 else 1
             
             for frame_num in range(0, total_frames, scan_step):
                 if not self.is_running: break
                 
-                # UI Progress
-                if frame_num % 50 == 0:
+                # Update UI occasionally
+                if frame_num % 100 == 0:
                     current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
                     self.progress_signal.emit(current_percent)
 
@@ -118,39 +122,33 @@ class IndexerWorker(QThread):
                 if prev_hist is not None:
                     similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
                 
-                # If similarity drops drastically, we entered a new "Scene" (Subject 2?)
+                # New Scene Detected?
                 if similarity < self.scene_threshold:
-                    # Save the previous scene's best frame if it was good
                     if current_scene['best_frame'] is not None:
                         detected_scenes.append(current_scene)
-                    # Reset tracker for new scene
                     current_scene = {'best_frame': None, 'score': -1.0}
 
-                # --- 2. FIND BEST ACTION FRAME (With Blur Gate) ---
-                # We want: HIGH change (low similarity) AND HIGH sharpness
+                # --- 2. FIND BEST ACTION FRAME ---
                 if prev_hist is not None:
-                    motion_score = (1.0 - similarity) # 0.0 (still) to 1.0 (big move)
-                    
-                    # Logic: 
-                    # If image is blurry (< blur_threshold), penalty is massive.
-                    # If image is sharp, we reward motion.
+                    motion_score = (1.0 - similarity)
                     if sharpness > self.blur_threshold:
-                        # Composite Score: Motion * Sharpness
                         quality_score = motion_score * sharpness
-                        
                         if quality_score > current_scene['score']:
                             current_scene['score'] = quality_score
                             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            current_scene['best_frame'] = Image.fromarray(rgb)
+                            pil_img = Image.fromarray(rgb)
+                            
+                            # OPTIMIZATION: Resize immediately to save RAM
+                            # We only need ~384px for BLIP captioning
+                            current_scene['best_frame'] = self._resize_for_ai(pil_img, 480)
 
-                # --- 3. INDEXING FOR TAGS (Standard) ---
+                # --- 3. INDEXING FOR TAGS (CLIP) ---
                 time_since_last = current_time - last_indexed_time
                 should_index = False
                 
                 if time_since_last >= self.max_interval:
                     should_index = True
                 elif time_since_last >= self.min_interval:
-                     # Index if there's enough change, but not blurry garbage
                      if similarity < 0.85 and sharpness > self.blur_threshold:
                         should_index = True
 
@@ -158,7 +156,11 @@ class IndexerWorker(QThread):
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     pil_img = Image.fromarray(img_rgb)
                     
-                    frames_batch.append(pil_img)
+                    # OPTIMIZATION: Resize immediately for CLIP (input is usually 224 or 336)
+                    # Storing 64 4K images in a list will crash Python.
+                    resized_img = self._resize_for_ai(pil_img, 336)
+                    
+                    frames_batch.append(resized_img)
                     timestamps_batch.append(current_time)
                     last_indexed_time = current_time
 
@@ -169,69 +171,69 @@ class IndexerWorker(QThread):
                         
                 prev_hist = curr_hist
 
-            # End of file: Save the last active scene
+            # --- END OF FILE PROCESSING ---
             if current_scene['best_frame'] is not None:
                 detected_scenes.append(current_scene)
 
-            # Process remaining CLIP batch
+            # Process leftover batch
             if frames_batch:
                 self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores)
             
-            # --- PHASE 2: GENERATE MULTI-SCENE DESCRIPTION (BLIP-2) ---
-            descriptions = []
-            
-            # Limit to max 3 scenes per clip to prevent spamming
-            final_scenes = detected_scenes[:3]
-            
-            # --- FIX 2: FALLBACK MECHANISM ---
-            # If no frames passed the "Action/Sharpness" gate, force grab the middle frame.
-            if not final_scenes and total_frames > 0:
-                try:
-                    mid_frame = total_frames // 2
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame)
-                    ret, frame = cap.read()
-                    if ret:
-                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        # Create a "fake" scene with score 0 so BLIP processes it
-                        final_scenes.append({'best_frame': Image.fromarray(rgb), 'score': 0.0})
-                        self.log_signal.emit(f"   (Using fallback frame for {os.path.basename(video_path)})")
-                except Exception as e:
-                    print(f"Fallback frame grab failed: {e}")
-            # ---------------------------------
-            
             cap.release()
 
+            # --- PHASE 2: GENERATE DESCRIPTIONS (BLIP-2) ---
+            descriptions = []
+            final_scenes = detected_scenes[:3] # Max 3 scenes per video
+            
+            # Fallback: If no good frames found, try grabbing middle frame
+            if not final_scenes and total_frames > 0:
+                try:
+                    cap_retry = cv2.VideoCapture(video_path)
+                    cap_retry.set(cv2.CAP_PROP_POS_FRAMES, total_frames // 2)
+                    ret, frame = cap_retry.read()
+                    cap_retry.release()
+                    if ret:
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        pil_img = Image.fromarray(rgb)
+                        # Resize fallback too
+                        final_scenes.append({'best_frame': self._resize_for_ai(pil_img, 480), 'score': 0.0})
+                except: pass
+            
             for i, scene in enumerate(final_scenes):
                 try:
-                    inputs = blip_processor(images=scene['best_frame'], return_tensors="pt").to(ai.device, dtype=ai.dtype)
+                    # Pass the resized image to BLIP
+                    # Ensure we use the correct device and dtype from AIBackend
+                    inputs = blip_processor(images=scene['best_frame'], return_tensors="pt").to(ai.device)
+                    
+                    # BLIP needs inputs in the correct dtype if model is float16
+                    if ai.dtype == torch.float16:
+                        inputs["pixel_values"] = inputs["pixel_values"].half()
+
                     with torch.no_grad():
-                        out_ids = blip_model.generate(**inputs, max_new_tokens=40) # Short sentence
+                        out_ids = blip_model.generate(**inputs, max_new_tokens=40)
                         desc = blip_processor.batch_decode(out_ids, skip_special_tokens=True)[0].strip()
                         if desc:
-                            # Cleanup punctuation
                             if desc.endswith('.'): desc = desc[:-1]
                             descriptions.append(desc)
                 except Exception as e:
                     print(f"BLIP Scene {i} Error: {e}")
 
-            # Join sentences: "A woman running. A man drinking coffee."
+            # Format Summary
             if descriptions:
-                # Dedup sentences (in case the scene split was redundant)
                 unique_desc = list(dict.fromkeys(descriptions))
                 full_description = ". ".join([d[0].upper() + d[1:] for d in unique_desc]) + "."
             else:
-                full_description = "Static shot or unclear action."
+                full_description = "Visuals unavailable."
 
-            # --- PHASE 3: FINALIZE TAGS (CLIP) ---
+            # --- PHASE 3: FINALIZE TAGS ---
             sorted_tags = sorted(tag_scores.items(), key=lambda item: item[1], reverse=True)
             final_tags = [tag for tag, score in sorted_tags[:25] if score > 0.05]
             if not final_tags and sorted_tags:
                 final_tags = [t[0] for t in sorted_tags[:5]]
 
-            # Merge with Transcript
+            # Append Audio context if available
             current_meta = db.get_video_metadata(video_path)
             transcript_data = current_meta.get("transcript", [])
-            
             final_summary = full_description
             if transcript_data:
                  full_text = " ".join([t['text'] for t in transcript_data])
@@ -241,6 +243,7 @@ class IndexerWorker(QThread):
             db.save_tags(video_path, final_tags, final_summary)
             self.summary_signal.emit(video_path, final_summary)
         
+        # Cleanup
         ai.unload_models()
         self.progress_signal.emit(100)
         self.finished_signal.emit()
@@ -252,9 +255,12 @@ class IndexerWorker(QThread):
                 img_features = model.get_image_features(**inputs)
                 img_features /= img_features.norm(p=2, dim=-1, keepdim=True)
                 
+                # Save vectors to DB
                 vectors_list = img_features.cpu().numpy().tolist()
                 db.add_visual_embeddings(video_path, vectors_list, timestamps)
                 
+                # Match against tags
+                # (Batch Size x 512) @ (Tag Count x 512).T
                 similarity = (100.0 * img_features @ ai.tag_embeddings.T).softmax(dim=-1)
                 values, indices = similarity.topk(15, dim=-1)
                 

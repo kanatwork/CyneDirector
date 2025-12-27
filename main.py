@@ -1,10 +1,12 @@
+# [FILE: main.py]
 import sys
 import os
-import ctypes  # <--- NEW: Required for Windows Taskbar Icon Fix
+import ctypes  # Required for Windows Taskbar Icon Fix
 import traceback
 from datetime import datetime
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtGui import QIcon  # <--- NEW: Required to load the icon
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt 
 
 # Import Config first
 import config
@@ -16,13 +18,16 @@ def global_exception_handler(exctype, value, tb):
         sys.__excepthook__(exctype, value, tb)
         return
     
+    # Ensure log directory exists
+    os.makedirs(config.LOG_DIR, exist_ok=True)
+    
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_path = config.LOG_DIR / f"crash_{timestamp}.txt"
     
     error_msg = "".join(traceback.format_exception(exctype, value, tb))
     
     with open(log_path, "w") as f:
-        f.write(f"CYNEDIRECTOR V20 CRASH REPORT\n{'='*30}\n")
+        f.write(f"CYNEDIRECTOR V{config.VERSION} CRASH REPORT\n{'='*30}\n")
         f.write(error_msg)
         
     print(f"CRITICAL ERROR: {value}")
@@ -37,9 +42,8 @@ sys.excepthook = global_exception_handler
 # --- Main Entry Point ---
 def main():
     # 1. WINDOWS TASKBAR FIX (The Professional Touch)
-    # This separates your app from the generic Python icon in the taskbar
     if sys.platform == 'win32':
-        myappid = f'cynedirector.app.main.{config.VERSION}' # Arbitrary string
+        myappid = f'cynedirector.app.main.{config.VERSION}' 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
     # 2. Initialize App
@@ -47,8 +51,12 @@ def main():
     app.setApplicationName(config.APP_NAME)
     app.setApplicationVersion(config.VERSION)
     
+    # --- HIGH DPI SCALING FIX ---
+    # Ensures the app looks crisp on 4K monitors
+    if hasattr(Qt.HighDpiScaleFactorRoundingPolicy, 'PassThrough'):
+        app.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    
     # --- SET APPLICATION ICON ---
-    # We look for icon.svg in the assets folder
     icon_path = config.ASSETS_DIR / "icon.svg"
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
@@ -59,13 +67,12 @@ def main():
     # 4. Launch Project Dialog (The "Home Page")
     try:
         from gui.project_dialog import ProjectDialog
-    except ImportError:
-        QMessageBox.critical(None, "Setup Error", "Could not find 'gui/project_dialog.py'.\nMake sure the 'gui' folder exists.")
+    except ImportError as e:
+        QMessageBox.critical(None, "Setup Error", f"Could not find 'gui/project_dialog.py'.\nError: {e}")
         return
 
     welcome = ProjectDialog()
     
-    # Ensure the dialog also gets the icon (sometimes dialogs miss the global setting)
     if icon_path.exists():
         welcome.setWindowIcon(QIcon(str(icon_path)))
 
@@ -77,11 +84,11 @@ def main():
         print(f"Loading Project: {project_name} at {project_path}")
         
         # IMPORT MAIN WINDOW NOW (Lazy Loading)
+        # This keeps the startup dialog instant, and loads PyTorch/CV2 only after project selection.
         try:
             from gui.main_window import MainWindow
             window = MainWindow(project_path, project_name)
             
-            # Ensure Main Window gets the icon
             if icon_path.exists():
                 window.setWindowIcon(QIcon(str(icon_path)))
                 
@@ -89,10 +96,9 @@ def main():
             sys.exit(app.exec())
             
         except ImportError as e:
-            # Fallback
             msg = QMessageBox()
-            msg.setWindowTitle("Work In Progress")
-            msg.setText(f"Project '{project_name}' Selected!\n\n(The Main Window file is missing: {e})\n\nCheck 'gui/main_window.py'")
+            msg.setWindowTitle("Startup Error")
+            msg.setText(f"Failed to load Main Window.\n\nError: {e}")
             msg.exec()
             sys.exit()
     else:

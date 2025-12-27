@@ -1,11 +1,70 @@
+# [FILE: gui/faces_tab.py]
 import os
 import json
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QScrollArea, QGridLayout, 
-                             QFrame, QMessageBox, QInputDialog, QMenu, QApplication)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPixmap, QAction, QImage, QMouseEvent
+                             QFrame, QMessageBox, QInputDialog, QMenu, QApplication, QProgressDialog)
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, QSize
+from PyQt6.QtGui import QPixmap, QAction, QImage, QMouseEvent, QCursor
+from config import COLORS
 from core.face_db import FaceDB
 
+# --- WORKER: ASYNC FACE MERGE (Prevents Freeze) ---
+class FaceMergeWorker(QThread):
+    """
+    Scans the entire project for JSON sidecar files and updates Face IDs.
+    This is IO-intensive, so it MUST run in a background thread.
+    """
+    finished_signal = pyqtSignal(int) # Returns number of files updated
+
+    def __init__(self, project_path, primary_id, ids_to_remove):
+        super().__init__()
+        self.project_path = project_path
+        self.primary_id = primary_id
+        self.ids_to_remove = set(ids_to_remove)
+
+    def run(self):
+        updated_count = 0
+        
+        # Walk through project to find all .json sidecar files
+        for root, dirs, files in os.walk(self.project_path):
+            # Optimization: Skip internal DB folders to save time
+            if "_cyne_db" in root: continue
+            
+            for file in files:
+                if file.endswith(".json"):
+                    meta_path = os.path.join(root, file)
+                    try:
+                        with open(meta_path, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        # Check if this file contains any of the faces we are merging
+                        if "faces" in data:
+                            faces = data["faces"]
+                            changed = False
+                            new_faces = []
+                            
+                            for fid in faces:
+                                if fid in self.ids_to_remove:
+                                    # Replace old ID with the new Primary ID
+                                    new_faces.append(self.primary_id)
+                                    changed = True
+                                else:
+                                    new_faces.append(fid)
+                            
+                            if changed:
+                                # Remove duplicates (in case Primary ID was already present)
+                                data["faces"] = list(set(new_faces))
+                                
+                                # Atomic Write
+                                with open(meta_path, 'w', encoding='utf-8') as f:
+                                    json.dump(data, f, indent=4)
+                                updated_count += 1
+                    except:
+                        pass
+                        
+        self.finished_signal.emit(updated_count)
+
+# --- UI COMPONENT: FACE CARD ---
 class FaceCard(QFrame):
     delete_requested = pyqtSignal(str) 
     rename_requested = pyqtSignal(str, str)
@@ -18,6 +77,7 @@ class FaceCard(QFrame):
         self.is_selected = False 
         
         self.setFixedSize(130, 160)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.update_style() 
         
         layout = QVBoxLayout(self)
@@ -29,10 +89,11 @@ class FaceCard(QFrame):
         else:
             pix = image
             
+        # Crisp Thumbnail Scaling
         pix = pix.scaled(90, 90, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
         self.img_lbl.setPixmap(pix)
         self.img_lbl.setFixedSize(90, 90)
-        self.img_lbl.setStyleSheet("border-radius: 45px; background: black; border: 2px solid #333;")
+        self.img_lbl.setStyleSheet("border-radius: 45px; background: black; border: 2px solid #333;") # Circular look
         layout.addWidget(self.img_lbl, alignment=Qt.AlignmentFlag.AlignCenter)
         
         self.name_lbl = QLabel(name)
@@ -42,8 +103,8 @@ class FaceCard(QFrame):
 
     def update_style(self):
         if self.is_selected:
-            self.setStyleSheet("""
-                FaceCard { background: #3A3445; border-radius: 8px; border: 2px solid #BEAEDB; }
+            self.setStyleSheet(f"""
+                FaceCard {{ background: #3A3445; border-radius: 8px; border: 2px solid {COLORS['accent']}; }}
             """)
         else:
             self.setStyleSheet("""
@@ -65,25 +126,25 @@ class FaceCard(QFrame):
                     self.current_name = new_name
                     self.rename_requested.emit(self.person_id, new_name)
 
-    def contextMenuEvent(self, event):
-        event.ignore() 
-
+# --- MAIN TAB ---
 class FacesTab(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
         
+        # Header
         header_layout = QVBoxLayout()
         lbl_title = QLabel("DETECTED PEOPLE")
         lbl_title.setStyleSheet("color: #DDD; font-weight: 900; font-size: 14px;")
         
-        lbl_hint = QLabel("Hold CTRL + Click to select multiple faces to MERGE them.")
+        lbl_hint = QLabel("Hold CTRL + Click to select multiple faces to MERGE them (e.g., duplicates).")
         lbl_hint.setStyleSheet("color: #777; font-size: 11px; margin-bottom: 10px;")
         
         header_layout.addWidget(lbl_title)
         header_layout.addWidget(lbl_hint)
         layout.addLayout(header_layout)
         
+        # Grid Area
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: #121212; border: none;")
@@ -101,6 +162,7 @@ class FacesTab(QWidget):
         self.selected_ids = set() 
         self.project_path = None
         self.face_db = None
+        self.merge_worker = None
 
     def set_project_path(self, path):
         self.project_path = path
@@ -108,6 +170,7 @@ class FacesTab(QWidget):
         self.load_existing_faces()
 
     def load_existing_faces(self):
+        # Clear existing items safely
         for pid in list(self.cards.keys()):
             self.cards[pid].deleteLater()
         self.cards = {}
@@ -116,7 +179,7 @@ class FacesTab(QWidget):
 
         if not self.face_db: return
         
-        # Sort by name for neatness
+        # Sort by name
         sorted_ids = sorted(self.face_db.known_ids, key=lambda x: self.face_db.get_name(x))
 
         for pid in sorted_ids:
@@ -178,47 +241,22 @@ class FacesTab(QWidget):
         
         if not ok: return
 
-        # 1. Update Name of Primary in FaceDB
+        # 1. Update Name of Primary locally
         self.face_db.rename_person(primary_id, final_name)
         
-        # 2. VITAL FIX: Update Project Metadata (The JSON files)
-        # Scan all videos and replace the old IDs with the Primary ID
-        if self.project_path:
-            db_path = os.path.join(self.project_path, "_cyne_db", "metadata")
-            if os.path.exists(db_path):
-                ids_to_remove = set(ids_to_merge[1:])
-                
-                # Iterate over all metadata files
-                for filename in os.listdir(db_path):
-                    if not filename.endswith(".json"): continue
-                    
-                    meta_file = os.path.join(db_path, filename)
-                    try:
-                        with open(meta_file, 'r', encoding='utf-8') as f:
-                            data = json.load(f)
-                        
-                        if "faces" in data:
-                            faces = data["faces"]
-                            changed = False
-                            new_faces = []
-                            
-                            for fid in faces:
-                                if fid in ids_to_remove:
-                                    # Replace old ID with Primary ID
-                                    new_faces.append(primary_id)
-                                    changed = True
-                                else:
-                                    new_faces.append(fid)
-                            
-                            if changed:
-                                # Deduplicate (in case Primary ID was already there)
-                                data["faces"] = list(set(new_faces))
-                                with open(meta_file, 'w', encoding='utf-8') as f:
-                                    json.dump(data, f, indent=4)
-                    except Exception as e:
-                        print(f"Merge error on {filename}: {e}")
+        # 2. START BACKGROUND WORKER (The fix)
+        self.progress_dialog = QProgressDialog(f"Merging {len(ids_to_merge)} faces into '{final_name}'...", "Cancel", 0, 0, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.show()
+        
+        self.merge_worker = FaceMergeWorker(self.project_path, primary_id, ids_to_merge[1:])
+        self.merge_worker.finished_signal.connect(lambda count: self.on_merge_complete(count, primary_id, final_name, ids_to_merge))
+        self.merge_worker.start()
 
-        # 3. Remove Old IDs from FaceDB
+    def on_merge_complete(self, count, primary_id, final_name, ids_to_merge):
+        self.progress_dialog.close()
+        
+        # 3. Remove Old IDs from FaceDB & Disk
         for pid in ids_to_merge[1:]:
             self.delete_face(pid, confirm=False)
             
@@ -227,7 +265,7 @@ class FacesTab(QWidget):
         self.selected_ids.clear()
         self.load_existing_faces() # Refresh grid to remove gaps
         
-        QMessageBox.information(self, "Merge Complete", f"Merged into '{final_name}' and updated video references.")
+        QMessageBox.information(self, "Merge Complete", f"Merged into '{final_name}'.\nUpdated metadata for {count} video files.")
 
     def handle_rename(self, person_id, new_name):
         if self.face_db:

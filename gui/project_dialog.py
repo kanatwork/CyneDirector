@@ -1,4 +1,7 @@
+# [FILE: gui/project_dialog.py]
 import os
+import json
+import re
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QFileDialog, QLineEdit, QMessageBox, QFrame)
 from PyQt6.QtCore import Qt
@@ -35,8 +38,8 @@ class ProjectDialog(QDialog):
                 background-color: {COLORS['bg_input']}; 
                 border: 1px solid {COLORS['border']}; 
                 border-radius: 6px; 
-                padding: 0px 12px; /* No vertical padding to prevent clip */
-                min-height: 40px;  /* Explicit height */
+                padding: 0px 12px;
+                min-height: 40px; 
                 color: white; font-size: 13px;
                 selection-background-color: {COLORS['accent']};
                 selection-color: black;
@@ -107,7 +110,7 @@ class ProjectDialog(QDialog):
         
         self.loc_input = QLineEdit()
         self.loc_input.setReadOnly(True)
-        self.loc_input.setPlaceholderText("Select folder...")
+        self.loc_input.setPlaceholderText("Where should we save it?")
         loc_row.addWidget(self.loc_input)
         
         btn_browse = QPushButton("Browse")
@@ -157,32 +160,50 @@ class ProjectDialog(QDialog):
         layout.addStretch()
 
     def browse_location(self):
-        folder = QFileDialog.getExistingDirectory(self, "Select Project Folder")
+        folder = QFileDialog.getExistingDirectory(self, "Select Parent Folder")
         if folder:
             self.loc_input.setText(folder)
 
-    def create_project(self):
-        folder = self.loc_input.text()
-        name = self.name_input.text().strip()
-        
-        if not folder or not name:
-            QMessageBox.warning(self, "Missing Info", "Please enter a project name and select a folder.")
-            return
-            
-        project_file = os.path.join(folder, f"{name}{FILE_EXT}")
-        if os.path.exists(project_file):
-            QMessageBox.warning(self, "Error", "A project with this name already exists in that folder.")
-            return
+    def sanitize_filename(self, name):
+        # Remove invalid chars for Windows/Linux filenames
+        return re.sub(r'[<>:"/\\|?*]', '', name).strip()
 
-        try:
-            with open(project_file, 'w') as f:
-                f.write('{"version": "2.0", "files": []}')
+    def create_project(self):
+        parent_folder = self.loc_input.text()
+        raw_name = self.name_input.text()
+        name = self.sanitize_filename(raw_name)
+        
+        if not parent_folder or not name:
+            QMessageBox.warning(self, "Missing Info", "Please enter a project name and select a parent folder.")
+            return
             
-            self.selected_project_path = folder
+        # --- ROBUSTNESS FIX: Create a dedicated subfolder ---
+        # Instead of creating the file directly in 'Documents', create 'Documents/ProjectName/'
+        project_dir = os.path.join(parent_folder, name)
+        
+        try:
+            # 1. Create the Project Directory
+            os.makedirs(project_dir, exist_ok=True)
+            
+            # 2. Check if project file already exists
+            project_file = os.path.join(project_dir, f"{name}{FILE_EXT}")
+            if os.path.exists(project_file):
+                QMessageBox.warning(self, "Error", f"A project named '{name}' already exists in that folder.")
+                return
+
+            # 3. Initialize Project JSON
+            with open(project_file, 'w') as f:
+                f.write(json.dumps({"version": "2.0", "files": []}, indent=4))
+            
+            # 4. Pre-create Database Directory (Optional but good for permissions check)
+            os.makedirs(os.path.join(project_dir, "_cyne_db"), exist_ok=True)
+            
+            self.selected_project_path = project_dir
             self.project_name = name
             self.accept()
+            
         except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
+            QMessageBox.critical(self, "Error", f"Could not create project:\n{e}")
 
     def open_project(self):
         fpath, _ = QFileDialog.getOpenFileName(self, "Open Project", "", f"Cyne Project (*{FILE_EXT})")
