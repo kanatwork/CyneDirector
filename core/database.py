@@ -85,15 +85,26 @@ class Database:
                     json.dump(data, f, indent=4)
                 
                 # 2. Retry Loop for Windows Rename (Fix for "Permission Denied")
-                retries = 3
+                retries = 10
                 while retries > 0:
                     try:
-                        os.replace(temp_path, meta_path)
+                        # On Windows, os.replace can fail if destination exists and is locked
+                        if os.path.exists(meta_path):
+                            try:
+                                os.remove(meta_path)
+                            except OSError:
+                                # If we can't delete the target, we certainly can't replace it
+                                raise OSError("Target Locked")
+                                
+                        os.rename(temp_path, meta_path)
                         break
                     except OSError:
                         retries -= 1
-                        time.sleep(0.1) # Wait for file lock to release
+                        time.sleep(0.2) # Wait for file lock to release
                 
+                if retries == 0:
+                    print(f"❌ CRITICAL: Could not save metadata to {meta_path} (File Locked)")
+
             except Exception as e:
                 print(f"Save Error: {e}")
 

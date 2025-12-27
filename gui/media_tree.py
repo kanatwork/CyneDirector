@@ -7,17 +7,19 @@ from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QBrush, QDragEnterEvent, QDropEvent
 from config import COLORS
 
-# --- NEW WORKER: Offloads file reading to background thread ---
+# --- OPTIMIZED WORKER: Batch Emitting to prevent UI Freeze ---
 class FileMetadataLoader(QThread):
-    # Emits: (file_path, resolution, fps, status_dict, summary)
-    data_loaded = pyqtSignal(str, str, str, dict, str)
+    # CHANGED: Emits a LIST of tuples instead of single items
+    batch_ready = pyqtSignal(list) 
 
     def __init__(self, file_paths):
         super().__init__()
         self.file_paths = file_paths
         self.is_running = True
+        self.batch_size = 15  # Update UI every 15 items
 
     def run(self):
+        batch = []
         for path in self.file_paths:
             if not self.is_running: break
             
@@ -25,7 +27,7 @@ class FileMetadataLoader(QThread):
             status = {'visuals': False, 'audio': False, 'faces': False}
             summary_str = ""
 
-            # 1. Heavy Video Read
+            # 1. Video Metadata Read (We will swap this for FFmpeg later)
             try:
                 cap = cv2.VideoCapture(path)
                 if cap.isOpened():
@@ -52,9 +54,18 @@ class FileMetadataLoader(QThread):
                             summary_str = "Transcript available."
                 except: pass
             
-            self.data_loaded.emit(path, res_str, fps_str, status, summary_str)
-            # Tiny sleep to prevent GUI flooding on fast SSDs
-            time.sleep(0.005) 
+            # Add to batch
+            batch.append((path, res_str, fps_str, status, summary_str))
+            
+            # Emit if batch is full
+            if len(batch) >= self.batch_size:
+                self.batch_ready.emit(batch)
+                batch = []
+                time.sleep(0.01) # Yield to UI thread briefly
+
+        # Emit remaining items
+        if batch:
+            self.batch_ready.emit(batch)
 
     def stop(self):
         self.is_running = False
@@ -90,7 +101,6 @@ class MediaTree(QTreeWidget):
         
         # Thread Management
         self.loader_thread = None
-        self.pending_files = []
 
         self.setStyleSheet(f"""
             QTreeWidget {{ background: {COLORS['bg_app']}; border: 1px solid {COLORS['border']}; border-radius: 4px; font-size: 13px; color: #DDD; }}
@@ -158,64 +168,72 @@ class MediaTree(QTreeWidget):
             self._set_children_state(item, target)
         self.is_updating = False
 
-    # --- UPDATED: Async Adding ---
     def add_files_flat(self, file_paths):
-        # 1. Filter duplicates immediately
         existing_paths = set(self.get_all_file_paths())
         new_files = [p for p in file_paths if self.norm(p) not in existing_paths]
         
         if not new_files: return
 
-        # 2. Create "Pending" items immediately (Main Thread)
+        # Create Pending Items
         for path in new_files:
             item = QTreeWidgetItem(self)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDragEnabled)
             item.setCheckState(0, Qt.CheckState.Checked)
             
             item.setText(0, os.path.basename(path))
-            item.setText(1, "...") # Pending Res
-            item.setText(2, "...") # Pending FPS
+            item.setText(1, "...") 
+            item.setText(2, "...") 
             item.setText(3, "⬜")
             item.setText(4, "⬜")
             item.setText(5, "⬜")
             item.setText(6, "Waiting for scan...")
             item.setText(7, path)
         
-        # 3. Queue for background loading
         self._start_loader_thread(new_files)
 
     def _start_loader_thread(self, files):
-        # If thread exists, stop it and merge queues (simple approach: just restart)
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.stop()
             self.loader_thread.wait()
-            # In a real app, you'd merge pending_files, but for now we process the new batch
         
         self.loader_thread = FileMetadataLoader(files)
-        self.loader_thread.data_loaded.connect(self._update_item_data)
+        # CONNECT TO BATCH SIGNAL
+        self.loader_thread.batch_ready.connect(self._process_batch_update)
         self.loader_thread.start()
 
-    def _update_item_data(self, path, res, fps, status, summary):
-        # Find the item and update it
+    def _process_batch_update(self, batch_data):
+        """Receives a list of file updates to process at once."""
+        # Disable updates briefly for performance
+        self.setUpdatesEnabled(False)
+        
+        for data in batch_data:
+            path, res, fps, status, summary = data
+            self._update_item_data_internal(path, res, fps, status, summary)
+            
+        self.setUpdatesEnabled(True)
+
+    def _update_item_data_internal(self, path, res, fps, status, summary):
+        # Optimized lookup: In production, we'd use a dict {path: item}, 
+        # but for now we iterate (still faster than emitting 1000 signals).
         target = self.norm(path)
         root = self.invisibleRootItem()
         
-        # Helper to find item
-        def find_item(parent):
-            for i in range(parent.childCount()):
-                it = parent.child(i)
-                if self.norm(it.text(7)) == target: return it
-            return None
-
-        item = find_item(root)
-        if item:
-            item.setText(1, res)
-            item.setText(2, fps)
-            item.setText(6, summary)
+        # Iterative search (DFS)
+        stack = [root.child(i) for i in range(root.childCount())]
+        while stack:
+            item = stack.pop()
+            if self.norm(item.text(7)) == target:
+                item.setText(1, res)
+                item.setText(2, fps)
+                item.setText(6, summary)
+                self._set_status_icon(item, 3, status['visuals'])
+                self._set_status_icon(item, 4, status['audio'])
+                self._set_status_icon(item, 5, status['faces'])
+                return
             
-            self._set_status_icon(item, 3, status['visuals'])
-            self._set_status_icon(item, 4, status['audio'])
-            self._set_status_icon(item, 5, status['faces'])
+            # Add children to stack
+            for i in range(item.childCount()):
+                stack.append(item.child(i))
 
     def _set_status_icon(self, item, col, is_done):
         if is_done:
@@ -225,12 +243,9 @@ class MediaTree(QTreeWidget):
             item.setText(col, "⬜")
             item.setForeground(col, QBrush(QColor("#444")))
 
-    # --- NEW: Processing State ---
     def set_processing_icon(self, file_path, data_type):
-        """Sets an hourglass icon while AI is working"""
         col_map = {'visuals': 3, 'audio': 4, 'faces': 5}
         if data_type not in col_map: return
-        
         self.update_item_status(file_path, col_map[data_type], "⏳")
 
     def mark_visuals_done(self, file_path, summary_text):
@@ -249,54 +264,47 @@ class MediaTree(QTreeWidget):
         self.update_item_status(file_path, col, "⬜")
 
     def update_item_status(self, file_path, column_index, icon_text, summary_text=None):
-        root = self.invisibleRootItem()
         target_path = self.norm(file_path)
-
-        def _find_and_update(parent):
-            for i in range(parent.childCount()):
-                it = parent.child(i)
-                if self.norm(it.text(7)) == target_path:
-                    it.setText(column_index, icon_text)
-                    if icon_text == "✅":
-                        it.setForeground(column_index, QBrush(QColor(COLORS['accent'])))
-                    elif icon_text == "⏳":
-                        it.setForeground(column_index, QBrush(QColor("#FFEB3B"))) # Yellow for processing
-                    else:
-                        it.setForeground(column_index, QBrush(QColor("#444")))
-                    
-                    if summary_text: it.setText(6, summary_text)
-                    return True
-                if _find_and_update(it): return True
-            return False
+        root = self.invisibleRootItem()
+        stack = [root.child(i) for i in range(root.childCount())]
         
-        _find_and_update(root)
+        while stack:
+            it = stack.pop()
+            if self.norm(it.text(7)) == target_path:
+                it.setText(column_index, icon_text)
+                if icon_text == "✅":
+                    it.setForeground(column_index, QBrush(QColor(COLORS['accent'])))
+                elif icon_text == "⏳":
+                    it.setForeground(column_index, QBrush(QColor("#FFEB3B"))) 
+                else:
+                    it.setForeground(column_index, QBrush(QColor("#444")))
+                if summary_text: it.setText(6, summary_text)
+                return
+            for i in range(it.childCount()):
+                stack.append(it.child(i))
 
     def get_all_file_paths(self):
         paths = []
         root = self.invisibleRootItem()
-        def _recurse(p_item):
-            for i in range(p_item.childCount()):
-                it = p_item.child(i)
-                if it.childCount() == 0: paths.append(it.text(7))
-                _recurse(it)
-        _recurse(root)
+        stack = [root.child(i) for i in range(root.childCount())]
+        while stack:
+            it = stack.pop()
+            if it.childCount() == 0: paths.append(it.text(7))
+            for i in range(it.childCount()):
+                stack.append(it.child(i))
         return paths
     
     def get_selected_file_paths(self):
         return [item.text(7) for item in self.selectedItems() if item.childCount() == 0]
     
     def get_checked_file_paths(self):
-        """Returns a list of file paths for all items that are currently CHECKED."""
         paths = []
         root = self.invisibleRootItem()
-        
-        def _recurse(p_item):
-            for i in range(p_item.childCount()):
-                it = p_item.child(i)
-                # If it's a file (no children) and is Checked
-                if it.childCount() == 0 and it.checkState(0) == Qt.CheckState.Checked:
-                    paths.append(it.text(7)) # Column 7 is hidden full path
-                _recurse(it)
-        
-        _recurse(root)
+        stack = [root.child(i) for i in range(root.childCount())]
+        while stack:
+            it = stack.pop()
+            if it.childCount() == 0 and it.checkState(0) == Qt.CheckState.Checked:
+                paths.append(it.text(7))
+            for i in range(it.childCount()):
+                stack.append(it.child(i))
         return paths
