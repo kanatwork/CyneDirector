@@ -548,6 +548,8 @@ class MainWindow(QMainWindow):
 
     def update_audio_status(self, path):
         self.tree.mark_audio_done(path)
+        if self.current_preview_path and os.path.normpath(path) == os.path.normpath(self.current_preview_path):
+            self.update_preview_panel()
 
     def update_faces_status(self, path, count):
         self.tree.mark_faces_done(path)

@@ -397,33 +397,19 @@ import threading
 
 class AIBackend:
     _instance = None
-    _lock = threading.Lock() 
+    _lock = threading.Lock() # Fix for multi-threaded access
 
     def __new__(cls):
         if cls._instance is None:
-            with cls._lock: 
+            with cls._lock: # Ensure only one thread creates the instance
                 if cls._instance is None:
                     cls._instance = super(AIBackend, cls).__new__(cls)
                     
-                    # --- PERFORMANCE OPTIMIZATION FOR RTX 40/50 SERIES ---
+                    # --- FORCE GPU CHECK ---
                     if torch.cuda.is_available():
                         cls._instance.device = "cuda"
-                        
-                        # 1. Enable cuDNN Benchmark (Finds fastest algo for your GPU)
                         torch.backends.cudnn.benchmark = True 
-                        
-                        # 2. Enable TensorFloat-32 (TF32) - CRITICAL FOR SPEED
-                        torch.backends.cuda.matmul.allow_tf32 = True
-                        torch.backends.cudnn.allow_tf32 = True
-                        
-                        # 3. High Precision Matrix Mul
-                        try:
-                            torch.set_float32_matmul_precision('high')
-                        except AttributeError:
-                            pass 
-
                         print(f"🚀 AI ACCELERATION: ON ({torch.cuda.get_device_name(0)})")
-                        print("   ✅ TensorFloat-32 (TF32) Enabled")
                     else:
                         cls._instance.device = "cpu"
                         print("⚠️ WARNING: RUNNING ON CPU. INDEXING WILL BE SLOW.")
@@ -432,12 +418,12 @@ class AIBackend:
                     cls._instance.clip_processor = None
                     cls._instance.whisper_model = None
                     cls._instance.tag_embeddings = None
-                    cls._instance.load_lock = threading.Lock() 
+                    cls._instance.load_lock = threading.Lock() # Lock for loading specific models
             
         return cls._instance
 
     def load_clip(self):
-        with self.load_lock:
+        with self.load_lock: # Prevent race condition if multiple workers try to load
             if self.clip_model: return self.clip_model, self.clip_processor
             
             print(f"Loading CLIP (Large) on {self.device}...")
@@ -447,15 +433,24 @@ class AIBackend:
                 
                 model_name = "openai/clip-vit-large-patch14"
                 self.clip_processor = CLIPProcessor.from_pretrained(model_name)
-                self.clip_model = CLIPModel.from_pretrained(model_name).to(self.device)
                 
-                # Pre-compute Tag Embeddings with larger batch
+                # --- ROBUST LOADING (Fix for RTX 50-Series) ---
+                try:
+                    self.clip_model = CLIPModel.from_pretrained(model_name).to(self.device)
+                except RuntimeError as e:
+                    if "no kernel image" in str(e) or "CUDA" in str(e):
+                        print(f"⚠️ GPU ERROR: Your GPU is too new for this PyTorch version.")
+                        print("   ➜ Switching to CPU mode automatically.")
+                        self.device = "cpu"
+                        self.clip_model = CLIPModel.from_pretrained(model_name).to(self.device)
+                    else:
+                        raise e
+                
+                # Pre-compute Tag Embeddings
                 print("Pre-computing Tag Embeddings...")
                 tags = get_tag_bank()
                 tag_embeddings_list = []
-                
-                # Increased batch size for initialization
-                batch_size = 100 
+                batch_size = 50
                 for i in range(0, len(tags), batch_size):
                     batch_tags = tags[i:i+batch_size]
                     inputs = self.clip_processor(text=batch_tags, return_tensors="pt", padding=True).to(self.device)
@@ -480,17 +475,24 @@ class AIBackend:
             
             try:
                 device_str = "cuda" if self.device == "cuda" else "cpu"
+                # Float16 is standard for RTX cards. INT8 is for CPU.
                 compute_type = "float16" if self.device == "cuda" else "int8"
                 
-                self.whisper_model = WhisperModel("large-v3", device=device_str, compute_type=compute_type)
+                try:
+                    self.whisper_model = WhisperModel("large-v3", device=device_str, compute_type=compute_type)
+                except RuntimeError as e:
+                    print(f"⚠️ GPU ERROR (Whisper): {e}")
+                    print("   ➜ Switching to CPU mode (int8)...")
+                    self.whisper_model = WhisperModel("large-v3", device="cpu", compute_type="int8")
 
             except Exception as e:
-                print(f"Whisper Load Error: {e}")
-                raise e
+                print(f"Whisper Load Error: {e}. Falling back to medium model.")
+                self.whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
                 
             return self.whisper_model
 
     def unload_models(self):
+        """Frees VRAM by deleting models and clearing cache."""
         with self.load_lock:
             print("🧹 Unloading AI Models...")
             if self.clip_model:
@@ -600,26 +602,15 @@ class Database:
                     json.dump(data, f, indent=4)
                 
                 # 2. Retry Loop for Windows Rename (Fix for "Permission Denied")
-                retries = 10
+                retries = 3
                 while retries > 0:
                     try:
-                        # On Windows, os.replace can fail if destination exists and is locked
-                        if os.path.exists(meta_path):
-                            try:
-                                os.remove(meta_path)
-                            except OSError:
-                                # If we can't delete the target, we certainly can't replace it
-                                raise OSError("Target Locked")
-                                
-                        os.rename(temp_path, meta_path)
+                        os.replace(temp_path, meta_path)
                         break
                     except OSError:
                         retries -= 1
-                        time.sleep(0.2) # Wait for file lock to release
+                        time.sleep(0.1) # Wait for file lock to release
                 
-                if retries == 0:
-                    print(f"❌ CRITICAL: Could not save metadata to {meta_path} (File Locked)")
-
             except Exception as e:
                 print(f"Save Error: {e}")
 
@@ -722,39 +713,22 @@ class FaceDB:
                     self.known_ids = []
                     self.known_encodings = []
 
-    def find_match(self, embedding, threshold=0.6):
-        """
-        Thread-safe method to find the closest face in the DB.
-        Returns (person_id, distance) or (None, min_dist)
-        """
+    def save_encodings(self):
         with self._lock:
-            if not self.known_encodings:
-                return None, 100.0
-            
-            try:
-                # Convert list of arrays to a single 2D matrix for vectorized math
-                known_matrix = np.array(self.known_encodings)
-                
-                # Calculate Euclidean distance to ALL faces at once
-                dists = np.linalg.norm(known_matrix - embedding, axis=1)
-                
-                # Find the best one
-                min_index = np.argmin(dists)
-                min_dist = dists[min_index]
-                
-                if min_dist < threshold:
-                    return self.known_ids[min_index], min_dist
-            except Exception as e:
-                print(f"Face Match Error: {e}")
-                
-            return None, 100.0
+            self._save_encodings_internal()
+
+    def save_names(self):
+        with self._lock:
+            self._save_names_internal()
 
     def add_face(self, person_id, encoding):
+        # FIX: Locking logic covers the SAVE operation now
         with self._lock:
             self.known_ids.append(person_id)
             self.known_encodings.append(encoding)
             self.id_to_name[person_id] = person_id 
             
+            # Save while locked!
             self._save_encodings_internal()
             self._save_names_internal()
 
@@ -790,6 +764,7 @@ class FaceDB:
         with self._lock:
             return f"Person_{len(self.id_to_name) + 100}"
 
+    # Helpers (Assume Lock is already held)
     def _save_encodings_internal(self):
         data = { "ids": self.known_ids, "encodings": self.known_encodings }
         with open(self.encodings_path, 'wb') as f:
@@ -798,89 +773,6 @@ class FaceDB:
     def _save_names_internal(self):
         with open(self.names_path, 'w') as f:
             json.dump(self.id_to_name, f, indent=4)
-
-==================================================
-FILE: core\media_engine.py
-==================================================
-import subprocess
-import json
-import os
-import sys
-
-class MediaEngine:
-    """
-    Robust wrapper for FFprobe to extract metadata from professional video formats.
-    Replaces unreliable OpenCV metadata reading.
-    """
-    
-    @staticmethod
-    def is_available():
-        """Checks if ffprobe is installed and in PATH."""
-        try:
-            subprocess.run(["ffprobe", "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
-        except FileNotFoundError:
-            return False
-
-    @staticmethod
-    def get_metadata(file_path):
-        """
-        Returns a tuple: (width, height, fps, duration_sec)
-        Returns (0, 0, 0.0, 0.0) if reading fails.
-        """
-        if not os.path.exists(file_path):
-            return 0, 0, 0.0, 0.0
-
-        # Command to get JSON output of stream info
-        cmd = [
-            "ffprobe",
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_streams",
-            "-select_streams", "v:0", # Only video stream
-            file_path
-        ]
-
-        try:
-            # Run process without opening a window on Windows (creationflags)
-            if sys.platform == 'win32':
-                # CREATE_NO_WINDOW = 0x08000000
-                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', creationflags=0x08000000)
-            else:
-                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
-                
-            if result.returncode != 0:
-                return 0, 0, 0.0, 0.0
-
-            data = json.loads(result.stdout)
-            
-            if not data.get("streams"):
-                return 0, 0, 0.0, 0.0
-
-            stream = data["streams"][0]
-            
-            # 1. Resolution
-            width = int(stream.get("width", 0))
-            height = int(stream.get("height", 0))
-            
-            # 2. FPS (FFprobe returns "num/den" string, e.g. "24000/1001")
-            r_frame_rate = stream.get("r_frame_rate", "0/0")
-            fps = 0.0
-            if "/" in r_frame_rate:
-                num, den = r_frame_rate.split("/")
-                if float(den) > 0:
-                    fps = float(num) / float(den)
-            else:
-                fps = float(r_frame_rate)
-
-            # 3. Duration
-            duration = float(stream.get("duration", 0.0))
-
-            return width, height, fps, duration
-
-        except Exception as e:
-            print(f"[MediaEngine] Error reading {file_path}: {e}")
-            return 0, 0, 0.0, 0.0
 
 ==================================================
 FILE: core\search_engine.py
@@ -2048,30 +1940,25 @@ class MainWindow(QMainWindow):
 FILE: gui\media_tree.py
 ==================================================
 import os
+import cv2
 import json
 import time
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QAbstractItemView, QHeaderView, QMenu
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QBrush, QDragEnterEvent, QDropEvent
 from config import COLORS
-from core.media_engine import MediaEngine  # <--- NEW: Uses our robust FFmpeg wrapper
 
-# --- WORKER: Batch Emitting + FFmpeg ---
+# --- NEW WORKER: Offloads file reading to background thread ---
 class FileMetadataLoader(QThread):
-    # Emits a LIST of tuples: [(path, res, fps, status_dict, summary), ...]
-    batch_ready = pyqtSignal(list) 
+    # Emits: (file_path, resolution, fps, status_dict, summary)
+    data_loaded = pyqtSignal(str, str, str, dict, str)
 
     def __init__(self, file_paths):
         super().__init__()
         self.file_paths = file_paths
         self.is_running = True
-        self.batch_size = 15  # Update UI in chunks of 15 to prevent freezing
 
     def run(self):
-        # Check if FFprobe is available once at start
-        has_ffprobe = MediaEngine.is_available()
-        
-        batch = []
         for path in self.file_paths:
             if not self.is_running: break
             
@@ -2079,17 +1966,19 @@ class FileMetadataLoader(QThread):
             status = {'visuals': False, 'audio': False, 'faces': False}
             summary_str = ""
 
-            # 1. ROBUST VIDEO METADATA READ (FFmpeg)
-            if has_ffprobe:
-                w, h, fps, dur = MediaEngine.get_metadata(path)
-                if w > 0 and h > 0:
+            # 1. Heavy Video Read
+            try:
+                cap = cv2.VideoCapture(path)
+                if cap.isOpened():
+                    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    fps = cap.get(cv2.CAP_PROP_FPS)
                     res_str = f"{w}x{h}"
                     fps_str = f"{fps:.2f}"
-            else:
-                # Fallback if FFmpeg is missing
-                res_str = "No FFprobe"
+                cap.release()
+            except: pass
 
-            # 2. JSON Metadata Read (Existing Logic)
+            # 2. JSON Metadata Read
             json_path = f"{path}.json"
             if os.path.exists(json_path):
                 try:
@@ -2104,23 +1993,13 @@ class FileMetadataLoader(QThread):
                             summary_str = "Transcript available."
                 except: pass
             
-            # Add to batch
-            batch.append((path, res_str, fps_str, status, summary_str))
-            
-            # Emit if batch is full
-            if len(batch) >= self.batch_size:
-                self.batch_ready.emit(batch)
-                batch = []
-                time.sleep(0.01) # Yield to UI thread briefly
-
-        # Emit any remaining items
-        if batch:
-            self.batch_ready.emit(batch)
+            self.data_loaded.emit(path, res_str, fps_str, status, summary_str)
+            # Tiny sleep to prevent GUI flooding on fast SSDs
+            time.sleep(0.005) 
 
     def stop(self):
         self.is_running = False
 
-# --- MAIN TREE WIDGET ---
 class MediaTree(QTreeWidget):
     files_dropped_signal = pyqtSignal(list)
     clear_data_signal = pyqtSignal(list, str)
@@ -2152,6 +2031,7 @@ class MediaTree(QTreeWidget):
         
         # Thread Management
         self.loader_thread = None
+        self.pending_files = []
 
         self.setStyleSheet(f"""
             QTreeWidget {{ background: {COLORS['bg_app']}; border: 1px solid {COLORS['border']}; border-radius: 4px; font-size: 13px; color: #DDD; }}
@@ -2219,71 +2099,64 @@ class MediaTree(QTreeWidget):
             self._set_children_state(item, target)
         self.is_updating = False
 
+    # --- UPDATED: Async Adding ---
     def add_files_flat(self, file_paths):
-        # Filter duplicates
+        # 1. Filter duplicates immediately
         existing_paths = set(self.get_all_file_paths())
         new_files = [p for p in file_paths if self.norm(p) not in existing_paths]
         
         if not new_files: return
 
-        # Create "Pending" items immediately on Main Thread
+        # 2. Create "Pending" items immediately (Main Thread)
         for path in new_files:
             item = QTreeWidgetItem(self)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsDragEnabled)
             item.setCheckState(0, Qt.CheckState.Checked)
             
             item.setText(0, os.path.basename(path))
-            item.setText(1, "...") 
-            item.setText(2, "...") 
+            item.setText(1, "...") # Pending Res
+            item.setText(2, "...") # Pending FPS
             item.setText(3, "⬜")
             item.setText(4, "⬜")
             item.setText(5, "⬜")
             item.setText(6, "Waiting for scan...")
             item.setText(7, path)
         
-        # Start background loader
+        # 3. Queue for background loading
         self._start_loader_thread(new_files)
 
     def _start_loader_thread(self, files):
+        # If thread exists, stop it and merge queues (simple approach: just restart)
         if self.loader_thread and self.loader_thread.isRunning():
             self.loader_thread.stop()
             self.loader_thread.wait()
+            # In a real app, you'd merge pending_files, but for now we process the new batch
         
         self.loader_thread = FileMetadataLoader(files)
-        # Connect to BATCH signal
-        self.loader_thread.batch_ready.connect(self._process_batch_update)
+        self.loader_thread.data_loaded.connect(self._update_item_data)
         self.loader_thread.start()
 
-    def _process_batch_update(self, batch_data):
-        """Receives a list of file updates to process at once."""
-        # Disable updates briefly for performance boost
-        self.setUpdatesEnabled(False)
-        
-        for data in batch_data:
-            path, res, fps, status, summary = data
-            self._update_item_data_internal(path, res, fps, status, summary)
-            
-        self.setUpdatesEnabled(True)
-
-    def _update_item_data_internal(self, path, res, fps, status, summary):
+    def _update_item_data(self, path, res, fps, status, summary):
+        # Find the item and update it
         target = self.norm(path)
         root = self.invisibleRootItem()
         
-        # Iterative Search (DFS) to find item by hidden path column
-        stack = [root.child(i) for i in range(root.childCount())]
-        while stack:
-            item = stack.pop()
-            if self.norm(item.text(7)) == target:
-                item.setText(1, res)
-                item.setText(2, fps)
-                item.setText(6, summary)
-                self._set_status_icon(item, 3, status['visuals'])
-                self._set_status_icon(item, 4, status['audio'])
-                self._set_status_icon(item, 5, status['faces'])
-                return
+        # Helper to find item
+        def find_item(parent):
+            for i in range(parent.childCount()):
+                it = parent.child(i)
+                if self.norm(it.text(7)) == target: return it
+            return None
+
+        item = find_item(root)
+        if item:
+            item.setText(1, res)
+            item.setText(2, fps)
+            item.setText(6, summary)
             
-            for i in range(item.childCount()):
-                stack.append(item.child(i))
+            self._set_status_icon(item, 3, status['visuals'])
+            self._set_status_icon(item, 4, status['audio'])
+            self._set_status_icon(item, 5, status['faces'])
 
     def _set_status_icon(self, item, col, is_done):
         if is_done:
@@ -2293,9 +2166,12 @@ class MediaTree(QTreeWidget):
             item.setText(col, "⬜")
             item.setForeground(col, QBrush(QColor("#444")))
 
+    # --- NEW: Processing State ---
     def set_processing_icon(self, file_path, data_type):
+        """Sets an hourglass icon while AI is working"""
         col_map = {'visuals': 3, 'audio': 4, 'faces': 5}
         if data_type not in col_map: return
+        
         self.update_item_status(file_path, col_map[data_type], "⏳")
 
     def mark_visuals_done(self, file_path, summary_text):
@@ -2314,50 +2190,56 @@ class MediaTree(QTreeWidget):
         self.update_item_status(file_path, col, "⬜")
 
     def update_item_status(self, file_path, column_index, icon_text, summary_text=None):
-        target_path = self.norm(file_path)
         root = self.invisibleRootItem()
-        stack = [root.child(i) for i in range(root.childCount())]
+        target_path = self.norm(file_path)
+
+        def _find_and_update(parent):
+            for i in range(parent.childCount()):
+                it = parent.child(i)
+                if self.norm(it.text(7)) == target_path:
+                    it.setText(column_index, icon_text)
+                    if icon_text == "✅":
+                        it.setForeground(column_index, QBrush(QColor(COLORS['accent'])))
+                    elif icon_text == "⏳":
+                        it.setForeground(column_index, QBrush(QColor("#FFEB3B"))) # Yellow for processing
+                    else:
+                        it.setForeground(column_index, QBrush(QColor("#444")))
+                    
+                    if summary_text: it.setText(6, summary_text)
+                    return True
+                if _find_and_update(it): return True
+            return False
         
-        while stack:
-            it = stack.pop()
-            if self.norm(it.text(7)) == target_path:
-                it.setText(column_index, icon_text)
-                if icon_text == "✅":
-                    it.setForeground(column_index, QBrush(QColor(COLORS['accent'])))
-                elif icon_text == "⏳":
-                    it.setForeground(column_index, QBrush(QColor("#FFEB3B"))) 
-                else:
-                    it.setForeground(column_index, QBrush(QColor("#444")))
-                
-                if summary_text: it.setText(6, summary_text)
-                return
-            for i in range(it.childCount()):
-                stack.append(it.child(i))
+        _find_and_update(root)
 
     def get_all_file_paths(self):
         paths = []
         root = self.invisibleRootItem()
-        stack = [root.child(i) for i in range(root.childCount())]
-        while stack:
-            it = stack.pop()
-            if it.childCount() == 0: paths.append(it.text(7))
-            for i in range(it.childCount()):
-                stack.append(it.child(i))
+        def _recurse(p_item):
+            for i in range(p_item.childCount()):
+                it = p_item.child(i)
+                if it.childCount() == 0: paths.append(it.text(7))
+                _recurse(it)
+        _recurse(root)
         return paths
     
     def get_selected_file_paths(self):
         return [item.text(7) for item in self.selectedItems() if item.childCount() == 0]
     
     def get_checked_file_paths(self):
+        """Returns a list of file paths for all items that are currently CHECKED."""
         paths = []
         root = self.invisibleRootItem()
-        stack = [root.child(i) for i in range(root.childCount())]
-        while stack:
-            it = stack.pop()
-            if it.childCount() == 0 and it.checkState(0) == Qt.CheckState.Checked:
-                paths.append(it.text(7))
-            for i in range(it.childCount()):
-                stack.append(it.child(i))
+        
+        def _recurse(p_item):
+            for i in range(p_item.childCount()):
+                it = p_item.child(i)
+                # If it's a file (no children) and is Checked
+                if it.childCount() == 0 and it.checkState(0) == Qt.CheckState.Checked:
+                    paths.append(it.text(7)) # Column 7 is hidden full path
+                _recurse(it)
+        
+        _recurse(root)
         return paths
 
 ==================================================
@@ -2938,14 +2820,14 @@ import subprocess
 import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QListWidget, 
                              QListWidgetItem, QLabel, QHBoxLayout, QPushButton,
-                             QAbstractItemView, QProgressBar, QFrame)
+                             QAbstractItemView)
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QMimeData, QUrl
-from PyQt6.QtGui import QPixmap, QImage, QDrag, QCursor, QIcon
+from PyQt6.QtGui import QPixmap, QImage, QDrag
 from config import COLORS
 from core.search_engine import SearchEngine
 from gui.player_window import PlayerWindow
 
-# --- CUSTOM DRAGGABLE LIST (Unchanged) ---
+# --- CUSTOM DRAGGABLE LIST ---
 class DraggableListWidget(QListWidget):
     def __init__(self):
         super().__init__()
@@ -2955,17 +2837,25 @@ class DraggableListWidget(QListWidget):
     def startDrag(self, supportedActions):
         item = self.currentItem()
         if not item: return
+
+        # Retrieve the hidden file path from the item
         file_path = item.data(Qt.ItemDataRole.UserRole)
+        
         if not file_path: return
 
+        # Create standard MIME data (File URL)
+        # This is what allows Premiere Pro / Windows Explorer to accept the drop
         mime_data = QMimeData()
         url = QUrl.fromLocalFile(file_path)
         mime_data.setUrls([url])
+
         drag = QDrag(self)
         drag.setMimeData(mime_data)
+        
+        # Execute Drag
         drag.exec(Qt.DropAction.CopyAction)
 
-# --- THUMBNAIL LOADER (Unchanged) ---
+# --- THUMBNAIL LOADER THREAD ---
 class ThumbnailLoader(QThread):
     thumb_ready = pyqtSignal(QListWidgetItem, QImage)
 
@@ -2985,15 +2875,21 @@ class ThumbnailLoader(QThread):
                 
                 ret, frame = cap.read()
                 cap.release()
-                
+            
                 if ret:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     h, w, c = frame.shape
-                    # Optimize: Resize in thread
+                    
+                    # --- CRITICAL OPTIMIZATION HERE ---
+                    # Resize IN THE THREAD before sending to UI.
+                    # This drastically reduces memory overhead and prevents UI lag.
                     q_img_full = QImage(frame.data, w, h, c*w, QImage.Format.Format_RGB888)
-                    q_thumb = q_img_full.scaled(120, 68, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    q_thumb = q_img_full.scaled(100, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    
+                    # Send only the tiny thumbnail
                     self.thumb_ready.emit(item, q_thumb.copy())
-            except: pass
+            except:
+                pass
 
     def stop(self):
         self.is_running = False
@@ -3012,37 +2908,33 @@ class SearchTab(QWidget):
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(15)
         
-        # Header
         lbl = QLabel("SMART B-ROLL FINDER")
         lbl.setStyleSheet(f"color: {COLORS['accent']}; font-size: 18px; font-weight: 900; letter-spacing: 1px;")
         layout.addWidget(lbl)
         
-        # Search Input
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search visuals (e.g. 'Golden hour', 'Running') or dialogue...")
         self.search_bar.returnPressed.connect(self.run_search)
-        self.search_bar.setFixedHeight(45)
         self.search_bar.setStyleSheet(f"""
             QLineEdit {{ 
-                padding: 0 15px; font-size: 14px; border-radius: 6px; 
+                padding: 12px; font-size: 14px; border-radius: 6px; 
                 background: #252526; border: 1px solid #444; color: white;
             }}
             QLineEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
         """)
         layout.addWidget(self.search_bar)
         
-        # Info / Status
         self.info_lbl = QLabel("Enter keywords to find footage.")
-        self.info_lbl.setStyleSheet("color: #777; font-size: 12px; font-weight: bold;")
+        self.info_lbl.setStyleSheet("color: #777; font-size: 12px;")
         layout.addWidget(self.info_lbl)
         
-        # Results List
+        # CHANGED: Use our custom DraggableListWidget
         self.results_list = DraggableListWidget()
         self.results_list.setStyleSheet(f"""
-            QListWidget {{ background: #181818; border: 1px solid #333; border-radius: 6px; outline: none; }}
-            QListWidget::item {{ border-bottom: 1px solid #2A2A2A; padding: 8px; }}
-            QListWidget::item:hover {{ background: #222; }}
-            QListWidget::item:selected {{ background: #2A2A2A; border: 1px solid {COLORS['accent']}; }}
+            QListWidget {{ background: #1E1E1E; border: 1px solid #333; border-radius: 6px; outline: none; }}
+            QListWidget::item {{ border-bottom: 1px solid #2A2A2A; padding: 5px; }}
+            QListWidget::item:hover {{ background: #2A2A2A; }}
+            QListWidget::item:selected {{ background: #333; border: 1px solid {COLORS['accent']}; }}
         """)
         layout.addWidget(self.results_list)
 
@@ -3063,23 +2955,23 @@ class SearchTab(QWidget):
         self.info_lbl.setText("Thinking...")
         self.info_lbl.repaint()
         
-        # --- PERFORM SEARCH ---
         results = self.engine.search(query)
-        self.info_lbl.setText(f"Found {len(results)} matches for '{query}' (Drag to Premiere to import)")
+        self.info_lbl.setText(f"Found {len(results)} clips for '{query}' (Drag to Premiere to import)")
         
         load_queue = []
         for res in results:
-            item = self.add_result_item(res)
+            item = self.add_result_item_placeholder(res)
             load_queue.append((item, res['path'], res.get('timestamp', 0)))
 
-        # Start loading thumbnails in background
         self.thumb_loader = ThumbnailLoader(load_queue)
         self.thumb_loader.thumb_ready.connect(self.update_thumbnail)
         self.thumb_loader.start()
 
-    def add_result_item(self, res):
+    def add_result_item_placeholder(self, res):
         item = QListWidgetItem(self.results_list)
-        item.setSizeHint(QSize(0, 90)) # Slightly taller for better layout
+        item.setSizeHint(QSize(0, 80))
+        
+        # CRITICAL: Attach the file path to the item so Drag-and-Drop can find it
         item.setData(Qt.ItemDataRole.UserRole, res['path'])
         
         widget = QWidget()
@@ -3087,94 +2979,72 @@ class SearchTab(QWidget):
         row.setContentsMargins(5, 5, 5, 5)
         row.setSpacing(15)
         
-        # 1. Thumbnail Placeholder
         thumb_lbl = QLabel()
-        thumb_lbl.setFixedSize(120, 68)
-        thumb_lbl.setStyleSheet("background: #111; border: 1px solid #333; color: #444; font-size: 10px;")
+        thumb_lbl.setFixedSize(100, 56)
+        thumb_lbl.setStyleSheet("background: #111; border: 1px solid #333; color: #555;")
         thumb_lbl.setText("Loading...")
         thumb_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         row.addWidget(thumb_lbl)
         
         item.thumb_widget = thumb_lbl 
         
-        # 2. Metadata Column
-        meta_col = QVBoxLayout()
-        meta_col.setSpacing(4)
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
         
-        # A. Filename
         filename = os.path.basename(res['path'])
         lbl_name = QLabel(filename)
         lbl_name.setStyleSheet("font-weight: bold; font-size: 13px; color: #E0E0E0;")
-        meta_col.addWidget(lbl_name)
         
-        # B. Match Context
-        type_color = COLORS['accent'] # Default Purple
-        if "DIALOGUE" in res['match_type']: type_color = "#FFD700" # Gold
-        elif "FILENAME" in res['match_type']: type_color = "#2196F3" # Blue
-        elif "CAST" in res['match_type']: type_color = "#4CAF50" # Green
+        type_color = COLORS['accent'] if "VISUAL" in res['match_type'] else "#2196F3"
+        if "DIALOGUE" in res['match_type']: type_color = "#FFC107"
             
-        lbl_ctx = QLabel(f"<span style='color:{type_color}; font-weight:800'>[{res['match_type']}]</span> {res['context']}")
-        lbl_ctx.setStyleSheet("color: #999; font-size: 11px;")
-        meta_col.addWidget(lbl_ctx)
-
-        # C. Confidence Badge (NEW!)
-        score = res.get('score', 0)
-        badge_color = "#444"
-        if score > 80: badge_color = "#2E7D32" # Dark Green
-        elif score > 50: badge_color = "#F57F17" # Dark Orange
+        lbl_ctx = QLabel(f"<span style='color:{type_color}; font-weight:bold'>[{res['match_type']}]</span> {res['context']}")
+        lbl_ctx.setStyleSheet("color: #888; font-size: 11px;")
         
-        lbl_score = QLabel(f" Confidence: {int(score)}% ")
-        lbl_score.setFixedSize(100, 16)
-        lbl_score.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_score.setStyleSheet(f"""
-            background-color: {badge_color}; color: white; 
-            border-radius: 3px; font-size: 9px; font-weight: bold;
-        """)
-        meta_col.addWidget(lbl_score)
+        info_layout.addWidget(lbl_name)
+        info_layout.addWidget(lbl_ctx)
+        row.addLayout(info_layout)
         
-        row.addLayout(meta_col)
         row.addStretch()
         
-        # 3. Action Buttons Column
-        btn_col = QVBoxLayout()
-        btn_col.setSpacing(5)
-        
         ts = res.get('timestamp', 0)
-        btn_text = f"▶ {int(ts)}s" if ts > 0 else "▶ PLAY"
+        btn_text = f" ▶ {int(ts)}s " if ts > 0 else " ▶ PLAY "
         
-        # Play Button
+        # --- PLAY BUTTON ---
         btn_play = QPushButton(btn_text)
         btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_play.clicked.connect(lambda: self.open_file(res['path'], ts))
-        btn_play.setFixedSize(70, 28)
+        btn_play.setFixedSize(80, 30)
         btn_play.setStyleSheet(f"""
             QPushButton {{
-                background: transparent; color: {COLORS['accent']}; 
-                border: 1px solid {COLORS['accent']}; border-radius: 4px; font-weight: bold; font-size: 11px;
+                background: {COLORS['bg_app']}; color: {COLORS['accent']}; 
+                border: 1px solid {COLORS['accent']}; border-radius: 4px; font-weight: bold;
             }}
             QPushButton:hover {{ background: {COLORS['accent']}; color: black; }}
         """)
-        btn_col.addWidget(btn_play)
+        row.addWidget(btn_play)
         
-        # Reveal Button
+        # --- SHOW IN EXPLORER BUTTON ---
         btn_explore = QPushButton("📂")
         btn_explore.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_explore.setToolTip("Show in Explorer")
         btn_explore.clicked.connect(lambda: self.show_in_explorer(res['path']))
-        btn_explore.setFixedSize(70, 28)
-        btn_explore.setStyleSheet("""
-            QPushButton { background: transparent; border: 1px solid #444; border-radius: 4px; color: #AAA; }
-            QPushButton:hover { border-color: #888; color: white; }
+        btn_explore.setFixedSize(30, 30)
+        btn_explore.setStyleSheet(f"""
+            QPushButton {{
+                background: {COLORS['bg_app']}; color: #AAA; 
+                border: 1px solid #444; border-radius: 4px;
+            }}
+            QPushButton:hover {{ border-color: white; color: white; }}
         """)
-        btn_col.addWidget(btn_explore)
+        row.addWidget(btn_explore)
 
-        row.addLayout(btn_col)
-        
         self.results_list.setItemWidget(item, widget)
         return item
 
     def update_thumbnail(self, item, q_image):
         if hasattr(item, 'thumb_widget'):
+            # The image is already scaled by the thread, so we just set it directly
             item.thumb_widget.setPixmap(QPixmap.fromImage(q_image))
             item.thumb_widget.setText("")
 
@@ -3226,10 +3096,14 @@ class FaceScannerWorker(QThread):
         self.project_path = project_path
         self.is_running = True
         
-        # We now use the FaceDB class for thread-safe matching
         self.face_db = FaceDB(project_path)
         self.db = Database(project_path)
         
+        # Load known data
+        self.known_encodings = self.face_db.known_encodings
+        self.known_ids = self.face_db.known_ids
+
+        # Threshold for Cosine Similarity (0.6 is standard for Facenet)
         self.match_threshold = 0.6
 
     def run(self):
@@ -3257,6 +3131,15 @@ class FaceScannerWorker(QThread):
         # 2. PREPARE WORKLOAD
         total_files = len(self.file_paths)
         
+        # Check for DB Version Mismatch (Dlib uses 128D, Facenet uses 512D)
+        if self.known_encodings:
+            if len(self.known_encodings[0]) == 128:
+                self.log_signal.emit("⚠️ Database mismatch (Dlib detected). Clearing old face DB...")
+                # In a production app, we might migrate. For now, we reset to prevent crashes.
+                self.known_encodings = []
+                self.known_ids = []
+                # (Optional: You could trigger self.face_db.clear() here)
+
         for idx, video_path in enumerate(self.file_paths):
             if not self.is_running: break
             
@@ -3269,7 +3152,7 @@ class FaceScannerWorker(QThread):
             fps = cap.get(cv2.CAP_PROP_FPS)
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            # Optimization: Scan 1 frame every 1.5 seconds
+            # Optimization: Scan 1 frame every 1.5 seconds (Balance speed/accuracy)
             step = int(fps * 1.5) if fps > 0 else 30
             
             unique_faces_in_file = set()
@@ -3286,15 +3169,16 @@ class FaceScannerWorker(QThread):
                 pil_img = Image.fromarray(img_rgb)
 
                 try:
-                    # A. DETECT FACES
+                    # A. DETECT FACES (Get bounding boxes)
                     boxes, _ = mtcnn.detect(pil_img)
                     
                     if boxes is not None:
-                        # B. EXTRACT TENSORS
+                        # B. EXTRACT TENSORS (Pre-processed for Resnet)
+                        # mtcnn.extract returns a tensor of shape [N, 3, 160, 160]
                         face_tensors = mtcnn.extract(pil_img, boxes, save_path=None)
                         
                         if face_tensors is not None:
-                            # C. GENERATE EMBEDDINGS
+                            # C. GENERATE EMBEDDINGS (Batch process on GPU)
                             face_tensors = face_tensors.to(device)
                             with torch.no_grad():
                                 embeddings = resnet(face_tensors).detach().cpu().numpy()
@@ -3303,18 +3187,31 @@ class FaceScannerWorker(QThread):
                             for i, embedding in enumerate(embeddings):
                                 box = boxes[i]
                                 
-                                # --- UPDATED LOGIC: Delegate math to FaceDB ---
-                                # This prevents the list-subtraction crash and handles locking
-                                match_id, dist = self.face_db.find_match(embedding, self.match_threshold)
+                                # Find best match
+                                match_id = None
+                                min_dist = 100.0 # Arbitrary high start
+                                
+                                if self.known_encodings:
+                                    # Calculate Euclidean distances to all known faces
+                                    # (Facenet embeddings are roughly normalized)
+                                    dists = np.linalg.norm(self.known_encodings - embedding, axis=1)
+                                    min_index = np.argmin(dists)
+                                    min_dist = dists[min_index]
+                                    
+                                    if min_dist < self.match_threshold:
+                                        match_id = self.known_ids[min_index]
 
                                 # Logic: New Person or Known?
                                 if match_id is None:
                                     match_id = self.face_db.get_next_id()
                                     self.face_db.add_face(match_id, embedding)
                                     
-                                    # Generate Thumbnail from Original Image
-                                    x1, y1, x2, y2 = [int(b) for b in box]
+                                    # Update local cache
+                                    self.known_encodings.append(embedding)
+                                    self.known_ids.append(match_id)
                                     
+                                    # Generate Thumbnail from Original Image (Not the whitened tensor)
+                                    x1, y1, x2, y2 = [int(b) for b in box]
                                     # Clamp to image bounds
                                     h_img, w_img = img_rgb.shape[:2]
                                     x1, y1 = max(0, x1), max(0, y1)
@@ -3338,6 +3235,10 @@ class FaceScannerWorker(QThread):
 
                 except Exception as e:
                     pass # Skip frame on error
+
+                # Progress Update
+                percent = int((frame_num / total_frames) * 100)
+                # (Optional: emit percent if you want granular progress)
 
             cap.release()
 
@@ -3395,7 +3296,6 @@ FILE: workers\indexer.py
 from PyQt6.QtCore import QThread, pyqtSignal
 import cv2
 import torch
-import numpy as np
 from PIL import Image
 from core.ai_models import AIBackend
 from core.database import Database
@@ -3413,25 +3313,12 @@ class IndexerWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
-        self.batch_size = 96
-        
-        # Smart Indexing Settings
-        self.scene_threshold = 0.7  # Similarity score (lower = distinct scene)
-        self.min_interval = 1.0     # Minimum 1 sec between frames (prevents burst)
-        self.max_interval = 20.0    # Force index every 20 secs (for long takes)
-
-    def calculate_histogram(self, image):
-        """Creates a color fingerprint for the frame to detect cuts."""
-        # Convert to HSV for better color perception
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        # Calculate hist: (Hue: 50 bins, Saturation: 60 bins)
-        hist = cv2.calcHist([hsv], [0, 1], None, [50, 60], [0, 180, 0, 256])
-        cv2.normalize(hist, hist, 0, 1, cv2.NORM_MINMAX)
-        return hist
+        self.batch_size = 32 
 
     def run(self):
+        # NEW: Instant feedback for user
         self.progress_signal.emit(1)
-        self.log_signal.emit("Initializing AI Core (Smart Mode)...")
+        self.log_signal.emit("Initializing AI Core...")
         
         ai = AIBackend()
         db = Database(self.project_path)
@@ -3455,83 +3342,38 @@ class IndexerWorker(QThread):
             if not cap.isOpened(): continue
             
             fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps <= 0: fps = 24.0 # Fallback
-            
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            step = int(fps * 1.5) if fps > 0 else 30
             
             frames_batch = []
             timestamps_batch = []
             all_detected_indices = []
             
-            # --- SMART SCANNING VARIABLES ---
-            prev_hist = None
-            last_indexed_time = -self.max_interval # Ensure first frame is caught
-            
-            # Scan every 5th frame to speed up "Watching" 
-            # (We don't need to check every single frame for a cut)
-            scan_step = 5 
-            
-            for frame_num in range(0, total_frames, scan_step):
+            for frame_num in range(0, total_frames, step):
                 if not self.is_running: break
-                
-                # Update progress bar occasionally
-                if frame_num % 100 == 0:
-                    current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
-                    self.progress_signal.emit(current_percent)
-
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
                 ret, frame = cap.read()
                 if not ret: break
                 
-                current_time = frame_num / fps
-                time_since_last = current_time - last_indexed_time
+                img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(img)
                 
-                # 1. ALWAYS CAPTURE if max interval exceeded (Long take protection)
-                should_index = False
-                curr_hist = self.calculate_histogram(frame)
+                frames_batch.append(pil_img)
+                timestamps_batch.append(frame_num / fps if fps > 0 else 0)
                 
-                if time_since_last >= self.max_interval:
-                    should_index = True
-                    # self.log_signal.emit(f"   [Timed] {int(current_time)}s")
+                if len(frames_batch) >= self.batch_size:
+                    self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
+                    frames_batch = []
+                    timestamps_batch = []
                 
-                # 2. CHECK SCENE CUT (if we are past min_interval)
-                elif time_since_last >= self.min_interval:
-                    if prev_hist is not None:
-                        # Compare histograms (Correlation)
-                        similarity = cv2.compareHist(prev_hist, curr_hist, cv2.HISTCMP_CORREL)
-                        
-                        # If similarity drops below threshold, the scene changed
-                        if similarity < self.scene_threshold:
-                            should_index = True
-                            # self.log_signal.emit(f"   [Cut] {int(current_time)}s (Sim: {similarity:.2f})")
-                    else:
-                        should_index = True # Always index first valid frame
-
-                if should_index:
-                    # Queue for CLIP Analysis
-                    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    pil_img = Image.fromarray(img_rgb)
-                    
-                    frames_batch.append(pil_img)
-                    timestamps_batch.append(current_time)
-                    
-                    # Update State
-                    prev_hist = curr_hist
-                    last_indexed_time = current_time
-
-                    # Process Batch if full
-                    if len(frames_batch) >= self.batch_size:
-                        self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
-                        frames_batch = []
-                        timestamps_batch = []
+                current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
+                self.progress_signal.emit(current_percent)
             
-            # Process remaining frames
             if frames_batch:
                 self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, model, processor, all_detected_indices)
             
             cap.release()
             
-            # --- GENERATE SUMMARY (Unchanged) ---
             if all_detected_indices:
                 counts = Counter(all_detected_indices)
                 top_common = counts.most_common(5) 
@@ -3569,7 +3411,6 @@ class IndexerWorker(QThread):
                 
                 similarity = (100.0 * img_features @ ai.tag_embeddings.T).softmax(dim=-1)
                 top_vals, top_indices = similarity.topk(3, dim=-1)
-                
                 all_detected_indices.extend(top_indices.cpu().numpy().flatten())
                 
         except Exception as e:
