@@ -34,7 +34,31 @@ COLORS = {
     # --- CRITICAL MISSING KEYS ADDED BELOW ---
     "success": "#4CAF50",       # Green (Completed)
     "warning": "#FF9800",       # Orange (Processing/Warning)
-    "error": "#F44336"          # Red (Failed)
+    "error": "#F44336",         # Red (Failed)
+    
+    # --- NEW MODERN DESIGN TOKENS ---
+    "bg_workflow": "#252628",   # Workflow panel background
+    "bg_log": "#0F0F0F",        # Activity log background
+    "shadow": "rgba(0, 0, 0, 0.3)",  # Shadow color
+    "glow": "rgba(190, 174, 219, 0.2)",  # Accent glow effect
+    
+    # --- SPACING SYSTEM ---
+    "spacing_xs": "4px",
+    "spacing_sm": "8px",
+    "spacing_md": "12px",
+    "spacing_lg": "16px",
+    "spacing_xl": "20px",
+    "spacing_xxl": "24px",
+    
+    # --- BORDER RADIUS ---
+    "radius_sm": "4px",
+    "radius_md": "6px",
+    "radius_lg": "8px",
+    
+    # --- SHADOWS ---
+    "shadow_sm": "0 1px 3px rgba(0, 0, 0, 0.2)",
+    "shadow_md": "0 2px 8px rgba(0, 0, 0, 0.3)",
+    "shadow_lg": "0 4px 12px rgba(0, 0, 0, 0.4)"
 }
 
 STYLESHEET = f"""
@@ -57,41 +81,51 @@ STYLESHEET = f"""
         background-color: {COLORS['bg_input']}; 
         border: 1px solid {COLORS['border']}; 
         color: {COLORS['text_main']};
-        border-radius: 6px; 
-        padding: 8px 16px; 
+        border-radius: {COLORS['radius_md']}; 
+        padding: {COLORS['spacing_sm']} {COLORS['spacing_lg']}; 
         font-weight: 600;
+        font-size: 12px;
     }}
     QPushButton:hover {{ 
         background-color: #35373C; 
-        border-color: {COLORS['text_dim']}; 
+        border-color: {COLORS['accent']}; 
     }}
-    QPushButton:pressed {{ background-color: {COLORS['bg_app']}; }}
+    QPushButton:pressed {{ 
+        background-color: {COLORS['bg_app']}; 
+    }}
 
     /* ACCENT BUTTONS (Class-based styling) */
     QPushButton[class="accent"] {{ 
         background-color: {COLORS['accent']}; 
         color: #121212; 
         border: none;
+        border-radius: {COLORS['radius_md']};
+        padding: {COLORS['spacing_sm']} {COLORS['spacing_lg']};
+        font-weight: 700;
     }}
-    QPushButton[class="accent"]:hover {{ background-color: {COLORS['accent_hover']}; }}
+    QPushButton[class="accent"]:hover {{ 
+        background-color: {COLORS['accent_hover']}; 
+    }}
 
     /* INPUTS */
     QLineEdit, QTextBrowser, QTextEdit {{ 
         background-color: {COLORS['bg_input']}; 
         border: 1px solid {COLORS['border']}; 
-        border-radius: 4px; 
-        padding: 8px; 
+        border-radius: {COLORS['radius_sm']}; 
+        padding: {COLORS['spacing_sm']}; 
         color: white; 
         selection-background-color: {COLORS['accent']};
         selection-color: black;
     }}
-    QLineEdit:focus, QTextEdit:focus {{ border: 1px solid {COLORS['accent']}; }}
+    QLineEdit:focus, QTextEdit:focus {{ 
+        border: 1px solid {COLORS['accent']}; 
+    }}
 
     /* TREE / LIST VIEWS */
     QTreeWidget, QListWidget {{ 
         background-color: {COLORS['bg_app']}; 
         border: 1px solid {COLORS['border']}; 
-        border-radius: 6px;
+        border-radius: {COLORS['radius_md']};
         outline: none;
     }}
     QHeaderView::section {{ 
@@ -109,7 +143,7 @@ STYLESHEET = f"""
         border-left: 2px solid {COLORS['accent']};
     }}
 
-    /* SCROLLBARS (Subtle) */
+    /* SCROLLBARS (Subtle & Modern) */
     QScrollBar:vertical {{
         background: {COLORS['bg_app']};
         width: 10px;
@@ -120,8 +154,11 @@ STYLESHEET = f"""
         background: {COLORS['border']};
         min-height: 20px;
         border-radius: 5px;
+        margin: 2px;
     }}
-    QScrollBar::handle:vertical:hover {{ background: {COLORS['text_dim']}; }}
+    QScrollBar::handle:vertical:hover {{ 
+        background: {COLORS['accent']}; 
+    }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
     
     QScrollBar:horizontal {{
@@ -134,6 +171,10 @@ STYLESHEET = f"""
         background: {COLORS['border']};
         min-width: 20px;
         border-radius: 5px;
+        margin: 2px;
+    }}
+    QScrollBar::handle:horizontal:hover {{
+        background: {COLORS['accent']};
     }}
     
     /* TOOLTIPS */

@@ -10,6 +10,10 @@ from PyQt6.QtCore import Qt
 
 # Import Config first
 import config
+from core.logger import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 # --- Crash Handler ---
 def global_exception_handler(exctype, value, tb):
@@ -25,6 +29,9 @@ def global_exception_handler(exctype, value, tb):
     log_path = config.LOG_DIR / f"crash_{timestamp}.txt"
     
     error_msg = "".join(traceback.format_exception(exctype, value, tb))
+    
+    # Log to file and logger
+    logger.critical(f"CRASH: {value}\n{error_msg}")
     
     with open(log_path, "w") as f:
         f.write(f"CYNEDIRECTOR V{config.VERSION} CRASH REPORT\n{'='*30}\n")
@@ -81,24 +88,33 @@ def main():
         project_path = welcome.selected_project_path
         project_name = welcome.project_name
         
-        print(f"Loading Project: {project_name} at {project_path}")
+        # Update recent projects (already done in dialog, but ensure it's tracked)
+        from core.project_manager import ProjectManager
+        pm = ProjectManager()
+        pm.add_recent_project(project_path, project_name)
         
         # IMPORT MAIN WINDOW NOW (Lazy Loading)
         # This keeps the startup dialog instant, and loads PyTorch/CV2 only after project selection.
         try:
+            logger.info(f"Loading project: {project_name} at {project_path}")
             from gui.main_window import MainWindow
+            
+            logger.debug("Creating MainWindow instance")
             window = MainWindow(project_path, project_name)
+            logger.debug("MainWindow created successfully")
             
             if icon_path.exists():
                 window.setWindowIcon(QIcon(str(icon_path)))
                 
             window.show()
+            logger.info("MainWindow shown, entering event loop")
             sys.exit(app.exec())
             
-        except ImportError as e:
+        except Exception as e:
+            logger.exception("Exception during MainWindow creation")
             msg = QMessageBox()
             msg.setWindowTitle("Startup Error")
-            msg.setText(f"Failed to load Main Window.\n\nError: {e}")
+            msg.setText(f"Failed to load Main Window.\n\nError: {e}\n\nSee logs for details.")
             msg.exec()
             sys.exit()
     else:

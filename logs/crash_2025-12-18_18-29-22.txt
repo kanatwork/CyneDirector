@@ -1,7 +1,0 @@
-CYNEDIRECTOR V20 CRASH REPORT
-==============================
-Traceback (most recent call last):
-  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\project_dialog.py", line 59, in create_project
-    name, ok = QLineEdit.getText(None, "Project Name", "Enter Project Name:") # Using static getText for simplicity
-               ^^^^^^^^^^^^^^^^^
-AttributeError: type object 'QLineEdit' has no attribute 'getText'

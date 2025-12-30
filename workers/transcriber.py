@@ -1,6 +1,8 @@
 # [FILE: workers/transcriber.py]
 import os
 import json
+import time
+import torch
 from PyQt6.QtCore import QThread, pyqtSignal
 from core.ai_models import AIBackend
 from core.database import Database
@@ -12,11 +14,12 @@ class TranscriberWorker(QThread):
     finished_signal = pyqtSignal()
     file_finished_signal = pyqtSignal(str)
 
-    def __init__(self, file_paths, project_path):
+    def __init__(self, file_paths, project_path, mode="speed"):
         super().__init__()
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
+        self.mode = mode  # "speed" or "accuracy"
 
     def run(self):
         self.log_signal.emit("Initializing Whisper AI...")
@@ -27,9 +30,23 @@ class TranscriberWorker(QThread):
         db = Database(self.project_path)
         
         try:
-            # 
-            # Loads Faster-Whisper (Large-v3) with FP16 optimization
-            model = ai.load_whisper()
+            if self.mode == "accuracy":
+                self.log_signal.emit("Loading Whisper Large-v3 model (this may take a moment)...")
+                # Loads Faster-Whisper (Large-v3) with FP16 optimization for best quality
+                model = ai.load_whisper()
+                self.log_signal.emit("Whisper model loaded successfully")
+            else:  # speed mode
+                self.log_signal.emit("Loading Whisper Medium model for faster processing...")
+                # Use medium model for speed, or use int8 compute type
+                from faster_whisper import WhisperModel
+                try:
+                    # Try medium model first (faster than large-v3)
+                    model = WhisperModel("medium", device="cuda", compute_type="float16")
+                    self.log_signal.emit("Whisper Medium model loaded successfully")
+                except:
+                    # Fallback to large-v3 with int8 for speed
+                    model = WhisperModel("large-v3", device="cuda", compute_type="int8")
+                    self.log_signal.emit("Whisper Large-v3 (int8) loaded for speed")
         except Exception as e:
             self.log_signal.emit(f"CRITICAL: Audio Model Failed - {e}")
             self.finished_signal.emit()
@@ -41,22 +58,40 @@ class TranscriberWorker(QThread):
             if not self.is_running: break
             
             filename = os.path.basename(video_path)
-            self.log_signal.emit(f"Transcribing: {filename}")
+            self.log_signal.emit(f"Processing {idx + 1}/{total_files}: {filename}")
+            self.log_signal.emit(f"  → Starting transcription with VAD...")
+            
+            # Emit initial progress
+            base_progress = int((idx / total_files) * 100)
+            self.progress_signal.emit(base_progress)
             
             try:
                 # 2. Transcribe with VAD (Voice Activity Detection)
-                # vad_filter=True skips silence, speeding up processing significantly.
-                segments, info = model.transcribe(
-                    video_path, 
-                    beam_size=5, 
-                    vad_filter=True, 
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
+                # Mode-based VAD settings
+                self.log_signal.emit(f"  → Loading audio and analyzing...")
+                if self.mode == "accuracy":
+                    # More sensitive VAD for better segment detection
+                    segments, info = model.transcribe(
+                        video_path, 
+                        beam_size=5, 
+                        vad_filter=True, 
+                        vad_parameters=dict(min_silence_duration_ms=300)  # More sensitive
+                    )
+                else:  # speed mode
+                    # Less sensitive VAD for faster processing
+                    segments, info = model.transcribe(
+                        video_path, 
+                        beam_size=5, 
+                        vad_filter=True, 
+                        vad_parameters=dict(min_silence_duration_ms=500)  # Less sensitive
+                    )
                 
+                self.log_signal.emit(f"  → Processing transcript segments...")
                 segment_list = []
                 full_text = ""
+                segment_count = 0
                 
-                # Convert generator to list
+                # Convert generator to list with progress updates
                 for segment in segments:
                     if not self.is_running: break
                     
@@ -69,31 +104,156 @@ class TranscriberWorker(QThread):
                         "text": text
                     })
                     full_text += text + " "
+                    segment_count += 1
+                    
+                    # Emit progress every 10 segments
+                    if segment_count % 10 == 0:
+                        # Update progress: base progress + portion for current file
+                        current_progress = int((idx / total_files) * 100 + (segment_count / max(1, segment_count + 10) * (100 / total_files)))
+                        self.progress_signal.emit(min(99, current_progress))
+                        self.log_signal.emit(f"  → Processed {segment_count} segments...")
 
                 if not self.is_running: break
 
+                # Update progress before saving
+                save_progress = int(((idx + 0.8) / total_files) * 100)
+                self.progress_signal.emit(save_progress)
+
                 # 3. Save Transcript to Database
+                self.log_signal.emit(f"  → Saving {len(segment_list)} transcript segments...")
                 db.save_transcript(video_path, segment_list)
                 
-                # 4. Smart Summary Update
-                # If we already have a Visual summary, we APPEND the audio context
-                # instead of ignoring it or overwriting it.
+                # Update last_scanned timestamp for incremental indexing
+                try:
+                    file_mtime = os.path.getmtime(video_path)
+                    db.update_metadata_key(video_path, "last_scanned", file_mtime)
+                except OSError:
+                    db.update_metadata_key(video_path, "last_scanned", time.time())
+                
+                # 4. Generate embeddings for semantic search (only in accuracy mode for speed)
+                if self.mode == "accuracy":
+                    try:
+                        self.log_signal.emit(f"  → Generating transcript embeddings for semantic search...")
+                        # Use CLIP text encoder for dialogue embeddings
+                        ai_backend = AIBackend()
+                        if ai_backend.clip_model is None:
+                            try:
+                                ai_backend.load_clip()
+                            except Exception as clip_error:
+                                self.log_signal.emit(f"  WARNING: CLIP loading failed: {clip_error}. Skipping embeddings.")
+                                # Continue without embeddings - transcription still works
+                                pass
+                        
+                        if ai_backend.clip_model and ai_backend.clip_processor:
+                            # Generate embeddings for each segment
+                            segment_texts = [seg["text"] for seg in segment_list]
+                            if segment_texts:
+                                # Process in batches
+                                batch_size = 32
+                                all_embeddings = []
+                                all_ids = []
+                                all_metadatas = []
+                                total_batches = (len(segment_texts) + batch_size - 1) // batch_size
+                                
+                                for i in range(0, len(segment_texts), batch_size):
+                                    if not self.is_running: break
+                                    batch = segment_texts[i:i+batch_size]
+                                    batch_num = (i // batch_size) + 1
+                                    
+                                    # Progress update
+                                    if batch_num % 5 == 0 or batch_num == total_batches:
+                                        self.log_signal.emit(f"  → Processing embedding batch {batch_num}/{total_batches}...")
+                                    
+                                    inputs = ai_backend.clip_processor(text=batch, return_tensors="pt", padding=True).to(ai_backend.device)
+                                    
+                                    with torch.no_grad():
+                                        text_features = ai_backend.clip_model.get_text_features(**inputs)
+                                        text_features /= text_features.norm(p=2, dim=-1, keepdim=True)
+                                        embeddings = text_features.cpu().numpy().tolist()
+                                    
+                                    all_embeddings.extend(embeddings)
+                                    
+                                    # Create IDs and metadata
+                                    for j, seg in enumerate(segment_list[i:i+batch_size]):
+                                        seg_id = f"{video_path}_transcript_{seg['start']}"
+                                        all_ids.append(seg_id)
+                                        all_metadatas.append({
+                                            "source": video_path,
+                                            "start": seg['start'],
+                                            "end": seg['end'],
+                                            "text": seg['text']
+                                        })
+                                
+                                # Store in ChromaDB transcripts collection
+                                if all_embeddings:
+                                    db.transcripts.upsert(ids=all_ids, embeddings=all_embeddings, metadatas=all_metadatas)
+                                    self.log_signal.emit(f"  → Stored {len(all_embeddings)} transcript embeddings")
+                    except Exception as e:
+                        self.log_signal.emit(f"  WARNING: Transcript embedding error: {e}")
+                        # Don't fail the whole transcription if embedding fails
+                
+                # 5. Generate Summary (fast template-based, skip slow LLM in speed mode)
                 current_meta = db.get_video_metadata(video_path)
-                existing_summary = current_meta.get("summary", "")
+                visual_descriptions_temp = current_meta.get("visual_descriptions_temp", [])
                 
-                audio_preview = (full_text[:100] + "...") if len(full_text) > 100 else full_text
-                
-                if audio_preview:
-                    if existing_summary:
-                        # Don't duplicate if already there
-                        if "Audio:" not in existing_summary:
-                            new_summary = f"{existing_summary} | Audio: \"{audio_preview}\""
-                            db.save_summary(video_path, new_summary)
+                try:
+                    if visual_descriptions_temp:
+                        # Both visual and audio data exist
+                        if self.mode == "accuracy":
+                            # Try LLM summary in accuracy mode only
+                            self.log_signal.emit(f"  → Generating unified summary...")
+                            try:
+                                from core.summary_generator import generate_contextual_summary
+                                
+                                emotions = current_meta.get("emotions", [])
+                                objects = current_meta.get("objects", [])
+                                
+                                # Try LLM with timeout protection
+                                unified_summary = generate_contextual_summary(
+                                    visual_descriptions=visual_descriptions_temp,
+                                    transcript_text=full_text,
+                                    emotions=emotions,
+                                    objects=objects
+                                )
+                                
+                                if unified_summary and len(unified_summary) > 20:
+                                    db.save_summary(video_path, unified_summary)
+                                    db.update_metadata_key(video_path, "visual_descriptions_temp", None)
+                                    self.log_signal.emit(f"  → Generated unified summary")
+                                else:
+                                    # Fallback to template
+                                    raise Exception("LLM summary too short, using template")
+                            except Exception as e:
+                                # Fallback to fast template-based summary
+                                self.log_signal.emit(f"  → Using fast template summary (LLM unavailable)")
+                                audio_preview = (full_text[:200] + "...") if len(full_text) > 200 else full_text
+                                visual_text = ". ".join(visual_descriptions_temp[:3])  # Top 3 only
+                                db.save_summary(video_path, f"{visual_text}. Audio: \"{audio_preview}\"")
+                                db.update_metadata_key(video_path, "visual_descriptions_temp", None)
+                        else:
+                            # Speed mode: Use fast template summary
+                            self.log_signal.emit(f"  → Generating fast template summary...")
+                            audio_preview = (full_text[:200] + "...") if len(full_text) > 200 else full_text
+                            visual_text = ". ".join(visual_descriptions_temp[:3])  # Top 3 only
+                            db.save_summary(video_path, f"{visual_text}. Audio: \"{audio_preview}\"")
+                            db.update_metadata_key(video_path, "visual_descriptions_temp", None)
                     else:
+                        # Only audio data - save audio-only summary
+                        self.log_signal.emit(f"  → Generating audio summary...")
+                        audio_preview = (full_text[:200] + "...") if len(full_text) > 200 else full_text
                         db.save_summary(video_path, f"Audio: \"{audio_preview}\"")
+                except Exception as e:
+                    # Final fallback - don't crash on summary errors
+                    self.log_signal.emit(f"  WARNING: Summary generation error: {e}")
+                    try:
+                        audio_preview = (full_text[:200] + "...") if len(full_text) > 200 else full_text
+                        db.save_summary(video_path, f"Audio: \"{audio_preview}\"")
+                    except:
+                        pass  # If even this fails, skip summary
 
                 # Tell UI this file is done (Adds Green Checkmark)
                 self.file_finished_signal.emit(video_path)
+                self.log_signal.emit(f"  Completed: {filename} ({len(segment_list)} segments, {len(full_text)} chars)")
 
             except Exception as e:
                 self.log_signal.emit(f"Error on {filename}: {str(e)}")

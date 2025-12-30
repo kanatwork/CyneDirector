@@ -1,7 +1,0 @@
-CYNEDIRECTOR V20 CRASH REPORT
-==============================
-Traceback (most recent call last):
-  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\indexer.py", line 89, in run
-    last_indexed_time = -self.max_interval
-                         ^^^^^^^^^^^^^^^^^
-AttributeError: 'IndexerWorker' object has no attribute 'max_interval'

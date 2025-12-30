@@ -3,73 +3,71 @@ import os
 # --- CONFIGURATION ---
 OUTPUT_FILE = "FULL_PROJECT_DUMP.txt"
 
-# Folders to completely ignore (Prevent massive files)
+# Folders to completely ignore
 IGNORE_DIRS = {
-    '__pycache__', '.git', '.idea', '.vscode', 'venv', 'env', 
-    'node_modules', '_cyne_db', 'videos', 'footage', 'output', 'cache'
+    "_cyne_db",       # Database files (Heavy/Binary)
+    "__pycache__",    # Compiled python
+    ".git",           # Git history
+    ".vscode",        # Editor settings
+    "logs",           # Crash logs
+    "assets",         # Images/Icons
+    "venv",           # Virtual Environment
+    "env"
 }
 
-# File extensions to text-read (Add more if needed)
-ALLOWED_EXTENSIONS = {
-    '.py', '.json', '.md', '.txt', '.css', '.qss', '.bat', '.sh', '.xml', '.yml', '.yaml'
+# Only include files with these extensions
+INCLUDE_EXTS = {
+    ".py",            # Python Source
+    ".txt",           # Requirements/Notes (if any)
+    ".md"             # Readmes
 }
 
-# Specific files to ignore
+# Specific filenames to always exclude
 IGNORE_FILES = {
-    'pack_project.py', # Don't include this script itself
-    OUTPUT_FILE,       # Don't include the dump file
-    '.DS_Store',
-    'Thumbs.db'
+    "pack_project.py", # Don't include this script itself
+    "FULL_PROJECT_DUMP.txt",
+    ".DS_Store"
 }
 
-def pack_code():
-    project_root = os.getcwd()
+def pack_project():
+    project_root = os.path.dirname(os.path.abspath(__file__))
     
-    print(f"📦 Packing project from: {project_root}")
-    print(f"🚫 Ignoring folders: {', '.join(IGNORE_DIRS)}")
-    
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as outfile:
-        # Header
-        outfile.write("=== CYNEDIRECTOR CODEBASE DUMP ===\n\n")
-        
-        file_count = 0
-        
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as out:
+        out.write(f"=== CYNEDIRECTOR CODEBASE DUMP ===\n")
+        out.write(f"Generated from: {project_root}\n\n")
+
         for root, dirs, files in os.walk(project_root):
-            # Modify dirs in-place to skip ignored directories
-            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+            # 1. Filter Directories in-place
+            # This modifies 'dirs' so os.walk doesn't even enter ignored folders
+            dirs[:] = [d for d in dirs if d not in IGNORE_DIRS and not d.startswith(".")]
             
             for file in files:
                 if file in IGNORE_FILES:
                     continue
                 
-                # Check extension
+                # 2. Extension Check
                 _, ext = os.path.splitext(file)
-                if ext.lower() not in ALLOWED_EXTENSIONS:
+                if ext.lower() not in INCLUDE_EXTS:
                     continue
                 
+                # 3. Write File Content
                 full_path = os.path.join(root, file)
                 rel_path = os.path.relpath(full_path, project_root)
                 
+                print(f"Packing: {rel_path}")
+                
+                out.write(f"\n{'='*50}\n")
+                out.write(f"FILE: {rel_path}\n")
+                out.write(f"{'='*50}\n")
+                
                 try:
-                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as infile:
-                        content = infile.read()
-                        
-                        # Formatting for the dump
-                        outfile.write("\n" + "="*50 + "\n")
-                        outfile.write(f"FILE: {rel_path}\n")
-                        outfile.write("="*50 + "\n")
-                        outfile.write(content + "\n")
-                        
-                        file_count += 1
-                        print(f"   ✅ Packed: {rel_path}")
-                        
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        out.write(content + "\n")
                 except Exception as e:
-                    print(f"   ❌ Error reading {rel_path}: {e}")
+                    out.write(f"[ERROR READING FILE: {e}]\n")
 
-        outfile.write("\n=== END OF DUMP ===")
-        
-    print(f"\n🎉 Done! Packed {file_count} files into '{OUTPUT_FILE}'.")
-    print("You can now upload this file to the new chat.")
+    print(f"\n✅ Success! All source code packed into: {OUTPUT_FILE}")
 
 if __name__ == "__main__":
-    pack_code()
+    pack_project()
