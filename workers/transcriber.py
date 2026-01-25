@@ -59,6 +59,30 @@ class TranscriberWorker(QThread):
             
             filename = os.path.basename(video_path)
             self.log_signal.emit(f"Processing {idx + 1}/{total_files}: {filename}")
+            
+            # Check if transcript already exists
+            meta = db.get_video_metadata(video_path)
+            existing_transcript = meta.get("transcript", [])
+            
+            if existing_transcript and isinstance(existing_transcript, list) and len(existing_transcript) > 0:
+                # Check if file was modified since last transcription
+                try:
+                    file_mtime = os.path.getmtime(video_path)
+                    last_scanned = meta.get("last_scanned", 0)
+                    file_modified = file_mtime > last_scanned if last_scanned > 0 else True
+                    
+                    if not file_modified:
+                        self.log_signal.emit(f"  → Transcript already exists ({len(existing_transcript)} segments), skipping...")
+                        self.file_finished_signal.emit(video_path)
+                        progress = int(((idx + 1) / total_files) * 100)
+                        self.progress_signal.emit(progress)
+                        continue
+                    else:
+                        self.log_signal.emit(f"  → File modified since last transcription, re-transcribing...")
+                except OSError:
+                    # If we can't get mtime, proceed with transcription
+                    pass
+            
             self.log_signal.emit(f"  → Starting transcription with VAD...")
             
             # Emit initial progress
@@ -67,7 +91,7 @@ class TranscriberWorker(QThread):
             
             try:
                 # 2. Transcribe with VAD (Voice Activity Detection)
-                # Mode-based VAD settings
+                # Mode-based VAD settings - more sensitive for better completeness
                 self.log_signal.emit(f"  → Loading audio and analyzing...")
                 if self.mode == "accuracy":
                     # More sensitive VAD for better segment detection
@@ -75,16 +99,22 @@ class TranscriberWorker(QThread):
                         video_path, 
                         beam_size=5, 
                         vad_filter=True, 
-                        vad_parameters=dict(min_silence_duration_ms=300)  # More sensitive
+                        vad_parameters=dict(min_silence_duration_ms=200)  # More sensitive to catch all dialogue
                     )
                 else:  # speed mode
-                    # Less sensitive VAD for faster processing
+                    # Less sensitive VAD but still more sensitive than before
                     segments, info = model.transcribe(
                         video_path, 
                         beam_size=5, 
                         vad_filter=True, 
-                        vad_parameters=dict(min_silence_duration_ms=500)  # Less sensitive
+                        vad_parameters=dict(min_silence_duration_ms=300)  # More sensitive than before
                     )
+                
+                # Capture detected language from Whisper
+                detected_language = getattr(info, 'language', None)
+                if detected_language:
+                    self.log_signal.emit(f"  → Detected language: {detected_language}")
+                    db.update_metadata_key(video_path, "transcript_language", detected_language)
                 
                 self.log_signal.emit(f"  → Processing transcript segments...")
                 segment_list = []
@@ -98,11 +128,15 @@ class TranscriberWorker(QThread):
                     text = segment.text.strip()
                     if not text: continue
 
-                    segment_list.append({
+                    seg_dict = {
                         "start": segment.start,
                         "end": segment.end,
                         "text": text
-                    })
+                    }
+                    # Detect and store language for each segment
+                    from core.translator import detect_segment_language
+                    detect_segment_language(seg_dict)
+                    segment_list.append(seg_dict)
                     full_text += text + " "
                     segment_count += 1
                     
@@ -114,6 +148,17 @@ class TranscriberWorker(QThread):
                         self.log_signal.emit(f"  → Processed {segment_count} segments...")
 
                 if not self.is_running: break
+
+                # Detect gaps in transcription
+                # Estimate duration from last segment end time (add small buffer)
+                duration = segment_list[-1]['end'] + 1.0 if segment_list else 0
+                
+                from core.translator import detect_transcription_gaps
+                gaps = detect_transcription_gaps(segment_list, duration, max_gap_seconds=2.0)
+                if gaps:
+                    total_gap_time = sum(g['duration'] for g in gaps)
+                    self.log_signal.emit(f"  → Warning: Detected {len(gaps)} potential gaps totaling {total_gap_time:.1f}s")
+                    db.update_metadata_key(video_path, "transcription_gaps", gaps)
 
                 # Update progress before saving
                 save_progress = int(((idx + 0.8) / total_files) * 100)

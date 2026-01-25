@@ -52,7 +52,7 @@ class MediaLoaderWorker(QRunnable):
                 dur_str = "--:--"
 
             # 2. Check for Existing JSON Sidecar Data (legacy) or Database
-            status = {'visuals': False, 'audio': False}
+            status = {'visuals': False, 'audio': False, 'translation': False}
             summary_str = ""
             shot_type_str = ""
             
@@ -64,6 +64,7 @@ class MediaLoaderWorker(QRunnable):
                     data = db.get_video_metadata(self.path)
                     if data.get("tags"): status['visuals'] = True
                     if data.get("transcript"): status['audio'] = True
+                    if data.get("transcript_translated"): status['translation'] = True
                     summary_str = data.get("summary", "")
                     shot_type_str = data.get("shot_type", "")
             except:
@@ -78,18 +79,19 @@ class MediaLoaderWorker(QRunnable):
                             data = json.load(f)
                             if data.get("tags"): status['visuals'] = True
                             if data.get("transcript"): status['audio'] = True
+                            if data.get("transcript_translated"): status['translation'] = True
                             summary_str = data.get("summary", "")
                             shot_type_str = data.get("shot_type", "")
                     except:
                         pass
 
-            # 3. Emit Results
+            # 3. Emit Results (include translation status)
             self.signals.finished.emit(self.path, res_str, fps_str, dur_str, status, summary_str, shot_type_str)
 
         except Exception as e:
             # On generic failure, emit safe defaults
             self.signals.finished.emit(self.path, "Error", "--", "--:--", 
-                                     {'visuals': False, 'audio': False}, "", "")
+                                         {'visuals': False, 'audio': False, 'translation': False}, "", "")
 
 # --- THUMBNAIL WORKER ---
 class ThumbnailWorker(QRunnable):
@@ -184,8 +186,8 @@ class ThumbnailDelegate(QStyledItemDelegate):
             super().paint(painter, option, index)
             return
         
-        # Get file path from item (stored in column 9)
-        file_path = item.text(9) if item.columnCount() > 9 else None
+        # Get file path from item (stored in column 10)
+        file_path = item.text(10) if item.columnCount() > 10 else None
         
         # Check if this is a file (not folder)
         if not file_path or item.childCount() > 0:
@@ -215,8 +217,8 @@ class ThumbnailDelegate(QStyledItemDelegate):
         """Return size hint for thumbnail column."""
         if index.column() == 1:  # Thumbnails are now in column 1
             item = self.tree_widget.itemFromIndex(index) if self.tree_widget else None
-            if item and item.columnCount() > 9:
-                file_path = item.text(9)
+            if item and item.columnCount() > 10:
+                file_path = item.text(10)
                 # Only return larger size for files (not folders)
                 if file_path and item.childCount() == 0:
                     return QSize(124, 72)  # 120px width + padding, 68px height + padding
@@ -250,12 +252,14 @@ class MediaTree(QTreeWidget):
         # 3: FPS
         # 4: DUR
         # 5: VISUALS (👁️)
-        # 6: AUDIO (🔊)
-        # 7: SHOT TYPE (📹)
-        # 8: AI SUMMARY
-        # 9: FULL_PATH (Hidden)
+        # 5: VISUALS (👁️)
+        # 6: AUDIO/TRANSCRIPTION (🔊)
+        # 7: TRANSLATION (🌐)
+        # 8: SHOT TYPE (📹)
+        # 9: AI SUMMARY
+        # 10: FULL_PATH (Hidden)
         # Set header labels - Reordered so filename is first (tree column)
-        self.setHeaderLabels(["FILENAME", "", "RES", "FPS", "DUR", "👁️", "🔊", "📹 SHOT", "AI SUMMARY", "FULL_PATH"])
+        self.setHeaderLabels(["FILENAME", "", "RES", "FPS", "DUR", "👁️", "🔊", "🌐", "📹 SHOT", "AI SUMMARY", "FULL_PATH"])
         
         # Header Styling - Make columns resizable
         header = self.header()
@@ -629,7 +633,7 @@ class MediaTree(QTreeWidget):
             if item.childCount() == 0:  # Only files, not folders
                 item_rect = self.visualItemRect(item)
                 if viewport_rect.intersects(item_rect):
-                    file_path = item.text(9)
+                    file_path = item.text(10)
                     if file_path and os.path.isfile(file_path):
                         # Check if thumbnail already loaded
                         if file_path not in self.thumbnail_delegate.thumbnails:
@@ -744,7 +748,7 @@ class MediaTree(QTreeWidget):
 
     def handle_double_click(self, item, column):
         """Opens the player window when a file is double-clicked."""
-        file_path = item.text(9)  # Column 9 contains the full path (unchanged)
+        file_path = item.text(10)  # Column 10 contains the full path
         if file_path and os.path.exists(file_path):
             # Emit signal to main window to open player
             self.double_clicked_signal.emit(file_path)
@@ -814,8 +818,8 @@ class MediaTree(QTreeWidget):
         
         file_count = count_files_recursive(folder_item)
         
-        # Get original folder name from path stored in column 9
-        folder_path = folder_item.text(9)
+        # Get original folder name from path stored in column 10
+        folder_path = folder_item.text(10)
         if folder_path:
             folder_name = os.path.basename(folder_path)
             if not folder_name:
@@ -958,7 +962,7 @@ class MediaTree(QTreeWidget):
                 file_item.setText(6, "⬜")  # Audio
                 file_item.setText(7, "--")  # Shot type
                 file_item.setText(8, "Waiting for scan...")  # Summary
-                file_item.setText(9, path)  # Full path
+                file_item.setText(10, path)  # Full path (column 10)
                 
                 # Set explicit foreground colors for all text columns to ensure visibility
                 for col in [0, 2, 3, 4, 7, 8]:  # Updated column numbers (0 is filename now)
@@ -1010,7 +1014,7 @@ class MediaTree(QTreeWidget):
             folder_item.setCheckState(0, Qt.CheckState.Checked)  # Checkbox is in column 0 (tree column)
             folder_item.setText(0, "📁 Root")  # Filename (tree column - will show indented)
             folder_item.setText(1, "")  # Thumbnail column - empty for folders
-            folder_item.setText(9, folder_path if folder_path else ".")
+            folder_item.setText(10, folder_path if folder_path else ".")
             folder_item.setExpanded(True)
             self.folder_map[norm_folder] = folder_item
             return folder_item
@@ -1063,7 +1067,7 @@ class MediaTree(QTreeWidget):
             folder_item.setText(6, "")   # Audio
             folder_item.setText(7, "")   # Shot type
             folder_item.setText(8, "")   # Summary
-            folder_item.setText(9, current_path)  # Store path for reference
+            folder_item.setText(10, current_path)  # Store path for reference (column 10)
             
             # Set explicit foreground color for folder name to ensure visibility
             folder_item.setForeground(0, QBrush(QColor(COLORS['text_main'])))  # Filename is now column 0
@@ -1085,15 +1089,16 @@ class MediaTree(QTreeWidget):
         item.setText(2, res)  # RES column
         item.setText(3, fps)  # FPS column
         item.setText(4, dur)  # DUR column
-        item.setText(7, shot_type if shot_type else "--")  # Shot type column
-        item.setText(8, summary)  # Summary column
+        item.setText(8, shot_type if shot_type else "--")  # Shot type column (moved to 8)
+        item.setText(9, summary)  # Summary column (moved to 9)
         
         # Ensure text colors are visible for all columns
-        for col in [0, 2, 3, 4, 7, 8]:  # Column 0 is filename, others are metadata
+        for col in [0, 2, 3, 4, 8, 9]:  # Column 0 is filename, others are metadata
             item.setForeground(col, QBrush(QColor(COLORS['text_main'])))
         
-        self._set_status_icon(item, 5, status['visuals'])  # Changed from 4 to 5
-        self._set_status_icon(item, 6, status['audio'])  # Changed from 5 to 6
+        self._set_status_icon(item, 5, status['visuals'])  # Visuals column
+        self._set_status_icon(item, 6, status['audio'])  # Audio/transcription column
+        self._set_status_icon(item, 7, status.get('translation', False))  # Translation column
         
         # Update integration tooltip
         self._update_integration_tooltip(item)
@@ -1114,8 +1119,9 @@ class MediaTree(QTreeWidget):
     def _get_integration_status(self, item):
         """Get combined integration status for tooltip."""
         status = {
-            'visuals': item.text(5) == "✅",  # Changed from 4 to 5
-            'audio': item.text(6) == "✅"  # Changed from 5 to 6
+            'visuals': item.text(5) == "✅",
+            'audio': item.text(6) == "✅",
+            'translation': item.text(7) == "✅"
         }
         return status
     
@@ -1128,6 +1134,20 @@ class MediaTree(QTreeWidget):
             parts.append("Visual Analysis")
         if status['audio']:
             parts.append("Audio Transcription")
+        if status['translation']:
+            # Get translation method from database if available
+            file_path = item.text(10) if item.columnCount() > 10 else None
+            translation_method = None
+            if file_path:
+                try:
+                    from core.database import Database
+                    db = Database()
+                    meta = db.get_video_metadata(file_path)
+                    translation_method = meta.get("translation_method", "whisper")
+                except:
+                    pass
+            method_text = "DeepL" if translation_method == "deepl" else "Whisper"
+            parts.append(f"Translation ({method_text})")
         
         if parts:
             tooltip = "✓ " + " + ".join(parts)
@@ -1147,7 +1167,7 @@ class MediaTree(QTreeWidget):
             light_green = QColor("#90EE90")  # Light green color
             item.setBackground(0, QBrush(light_green))
             # Also highlight other visible columns
-            for col in range(1, 9):  # Columns 1-8 (skip hidden column 9)
+            for col in range(1, 10):  # Columns 1-9 (skip hidden column 10)
                 item.setBackground(col, QBrush(light_green))
         else:
             # Not fully indexed - remove highlighting
@@ -1157,12 +1177,12 @@ class MediaTree(QTreeWidget):
 
     # --- EXTERNAL UPDATES (OPTIMIZED LOOKUP) ---
     def set_processing_icon(self, file_path, data_type):
-        col_map = {'visuals': 5, 'audio': 6}  # Updated column numbers
+        col_map = {'visuals': 5, 'audio': 6, 'translation': 7}
         if data_type in col_map:
             self.update_item_status(file_path, col_map[data_type], "⏳")
 
     def mark_visuals_done(self, file_path, summary_text):
-        self.update_item_status(file_path, 5, "✅", summary_text)  # Changed from 4 to 5
+        self.update_item_status(file_path, 5, "✅", summary_text)
         # Also update shot type if available
         try:
             from core.database import Database
@@ -1173,15 +1193,19 @@ class MediaTree(QTreeWidget):
                 if shot_type:
                     item = self.item_map.get(self.norm(file_path))
                     if item:
-                        item.setText(7, shot_type)  # Changed from 6 to 7
+                        item.setText(8, shot_type)  # Shot type is now column 8
         except:
             pass
 
     def mark_audio_done(self, file_path):
-        self.update_item_status(file_path, 6, "✅")  # Changed from 5 to 6
+        self.update_item_status(file_path, 6, "✅")
+    
+    def mark_translation_done(self, file_path):
+        """Mark translation as complete for a file."""
+        self.update_item_status(file_path, 7, "✅")
         
     def reset_status(self, file_path, data_type):
-        col_map = {'visuals': 5, 'audio': 6}  # Updated column numbers
+        col_map = {'visuals': 5, 'audio': 6, 'translation': 7}
         if data_type in col_map:
             self.update_item_status(file_path, col_map[data_type], "⬜")
 
@@ -1232,7 +1256,7 @@ class MediaTree(QTreeWidget):
                         child = folder_item.child(i)
                         if child.childCount() == 0:
                             # It's a file
-                            child_path = child.text(9)
+                            child_path = child.text(10)
                             child_norm = self.norm(child_path)
                             if child_norm in self.item_map:
                                 del self.item_map[child_norm]
@@ -1240,13 +1264,13 @@ class MediaTree(QTreeWidget):
                         else:
                             # It's a subfolder
                             remove_all_files(child)
-                            folder_norm = self.norm(child.text(9))
+                            folder_norm = self.norm(child.text(10))
                             if folder_norm in self.folder_map:
                                 del self.folder_map[folder_norm]
                             folder_item.removeChild(child)
                     # Remove folder from map if empty
                     if folder_item.childCount() == 0:
-                        folder_norm = self.norm(folder_item.text(9))
+                        folder_norm = self.norm(folder_item.text(10))
                         if folder_norm in self.folder_map:
                             del self.folder_map[folder_norm]
                         parent = folder_item.parent() or root
@@ -1269,7 +1293,7 @@ class MediaTree(QTreeWidget):
         def collect_files(item):
             if item.childCount() == 0:
                 # This is a file
-                path = item.text(9)
+                path = item.text(10)
                 if path and os.path.isfile(path):  # Verify it's actually a file
                     paths.append(path)
             else:
@@ -1288,7 +1312,7 @@ class MediaTree(QTreeWidget):
         for item in self.selectedItems():
             if item.childCount() == 0:
                 # This is a file
-                path = item.text(9)
+                path = item.text(10)
                 if path and os.path.isfile(path):
                     paths.append(path)
             else:
@@ -1314,7 +1338,7 @@ class MediaTree(QTreeWidget):
             if item.childCount() == 0:
                 # This is a file
                 if item.checkState(0) == Qt.CheckState.Checked:  # Checkbox is in column 0
-                    path = item.text(9)
+                    path = item.text(10)
                     if path and os.path.isfile(path):
                         paths.append(path)
             else:

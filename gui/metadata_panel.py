@@ -3,9 +3,9 @@ import os
 import sys
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit, 
                              QTextEdit, QPushButton, QHBoxLayout, QMessageBox, QFrame,
-                             QFileDialog)
+                             QFileDialog, QProgressDialog, QCheckBox, QTabWidget)
 from PyQt6.QtCore import Qt, pyqtSignal
-from config import COLORS
+from config import COLORS, DEEPL_API_KEY
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,6 +20,9 @@ class MetadataPanel(QWidget):
         self.current_file_path = None
         self.selected_files = []  # For bulk operations
         self.is_bulk_mode = False
+        self.translate_worker = None
+        self.translated_segments = None
+        self.original_segments = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -83,20 +86,128 @@ class MetadataPanel(QWidget):
         self.input_summary.setReadOnly(True)
         layout.addWidget(self.input_summary)
 
-        # 3.5. Full Transcript Display
+        # 3.5. Full Transcript Display with Tabs
         lbl_transcript = QLabel("FULL AUDIO TRANSCRIPT")
         lbl_transcript.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: bold; margin-top: 5px;")
         layout.addWidget(lbl_transcript)
 
-        self.input_transcript = QTextEdit()
-        self.input_transcript.setPlaceholderText("Full audio transcript will appear here after transcription...")
-        self.input_transcript.setFixedHeight(200)  # Fixed height with scrollbar
-        self.input_transcript.setStyleSheet(self._get_input_style(read_only=True))
-        self.input_transcript.setReadOnly(True)
-        self.input_transcript.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        layout.addWidget(self.input_transcript)
+        # Create tab widget for original and translated transcripts
+        self.transcript_tabs = QTabWidget()
+        self.transcript_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid {COLORS['border']};
+                background: {COLORS['bg_app']};
+                border-radius: 4px;
+            }}
+            QTabBar::tab {{
+                background: {COLORS['bg_input']};
+                color: {COLORS['text_dim']};
+                padding: 8px 16px;
+                border: 1px solid {COLORS['border']};
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }}
+            QTabBar::tab:selected {{
+                background: {COLORS['bg_app']};
+                color: {COLORS['accent']};
+                border-color: {COLORS['accent']};
+            }}
+        """)
+        
+        # Original transcript tab
+        self.input_transcript_original = QTextEdit()
+        self.input_transcript_original.setPlaceholderText("Original language transcript will appear here after transcription...")
+        self.input_transcript_original.setStyleSheet(self._get_input_style(read_only=True))
+        self.input_transcript_original.setReadOnly(True)
+        self.input_transcript_original.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.transcript_tabs.addTab(self.input_transcript_original, "Original")
+        
+        # Translated transcript tab
+        self.input_transcript_translated = QTextEdit()
+        self.input_transcript_translated.setPlaceholderText("English translation will appear here after translation...")
+        self.input_transcript_translated.setStyleSheet(self._get_input_style(read_only=True))
+        self.input_transcript_translated.setReadOnly(True)
+        self.input_transcript_translated.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.transcript_tabs.addTab(self.input_transcript_translated, "English")
+        
+        self.transcript_tabs.setFixedHeight(200)
+        layout.addWidget(self.transcript_tabs)
+        
+        # Keep old input_transcript for backward compatibility (point to original tab)
+        self.input_transcript = self.input_transcript_original
 
-        # 4. Action Buttons
+        # 4. Transcription/Translation Controls
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(10)
+        
+        # Checkboxes for options
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.setSpacing(15)
+        
+        self.checkbox_transcribe = QCheckBox("Transcribe")
+        self.checkbox_transcribe.setChecked(True)  # Default to checked
+        self.checkbox_transcribe.stateChanged.connect(self.update_start_process_button_state)
+        self.checkbox_transcribe.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS['text_main']};
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 4px;
+                background: {COLORS['bg_input']};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {COLORS['accent']};
+                border-color: {COLORS['accent']};
+            }}
+        """)
+        checkbox_layout.addWidget(self.checkbox_transcribe)
+        
+        self.checkbox_translate = QCheckBox("Translate to English")
+        self.checkbox_translate.setChecked(False)
+        self.checkbox_translate.stateChanged.connect(self.update_start_process_button_state)
+        self.checkbox_translate.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS['text_main']};
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 4px;
+                background: {COLORS['bg_input']};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {COLORS['accent']};
+                border-color: {COLORS['accent']};
+            }}
+        """)
+        checkbox_layout.addWidget(self.checkbox_translate)
+        
+        checkbox_layout.addStretch()
+        controls_layout.addLayout(checkbox_layout)
+        
+        # DeepL Status Indicator
+        self.deepl_status_label = QLabel("")
+        self.deepl_status_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                font-style: italic;
+                padding: 4px 0px;
+            }}
+        """)
+        self.deepl_status_label.hide()  # Hidden by default, shown when file is loaded
+        controls_layout.addWidget(self.deepl_status_label)
+        
+        # Action Buttons
         btn_layout = QHBoxLayout()
         
         self.btn_save = QPushButton("SAVE CHANGES")
@@ -113,6 +224,28 @@ class MetadataPanel(QWidget):
             QPushButton:hover {{ background: {COLORS['accent_hover']}; }}
         """)
         btn_layout.addWidget(self.btn_save)
+        
+        self.btn_start_process = QPushButton("▶ START PROCESS")
+        self.btn_start_process.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_start_process.clicked.connect(self.handle_start_process)
+        self.btn_start_process.setFixedHeight(40)
+        self.btn_start_process.setStyleSheet(f"""
+            QPushButton {{
+                background: {COLORS['accent']}; color: #121212;
+                border: none; border-radius: 4px; 
+                font-weight: 800; font-size: 12px;
+                letter-spacing: 0.5px;
+            }}
+            QPushButton:hover {{ 
+                background: {COLORS['accent_hover']};
+            }}
+            QPushButton:disabled {{
+                background: {COLORS['bg_app']};
+                color: #666;
+                border-color: #333;
+            }}
+        """)
+        btn_layout.addWidget(self.btn_start_process)
         
         self.btn_export_srt = QPushButton("EXPORT SRT")
         self.btn_export_srt.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -137,7 +270,8 @@ class MetadataPanel(QWidget):
         """)
         btn_layout.addWidget(self.btn_export_srt)
         
-        layout.addLayout(btn_layout)
+        controls_layout.addLayout(btn_layout)
+        layout.addLayout(controls_layout)
         
         # Bulk operations panel (hidden by default)
         self.bulk_panel = self.create_bulk_panel()
@@ -328,6 +462,9 @@ class MetadataPanel(QWidget):
             self.hide_bulk_mode()
             self.current_file_path = file_path
             
+            # Update DeepL status indicator
+            self.update_deepl_status()
+            
             # Reset Edit Mode
             if self.btn_edit.isChecked():
                 self.btn_edit.setChecked(False)
@@ -347,8 +484,23 @@ class MetadataPanel(QWidget):
             # Load and display full transcript
             self.load_transcript(file_path)
             
+            # Ensure segments have language detection (for existing transcripts)
+            try:
+                from core.database import Database
+                db = Database()
+                db.ensure_segment_languages(file_path)
+            except Exception as e:
+                logger.debug(f"Could not ensure segment languages: {e}")
+            
+            # Also load translated transcript if available
+            self.load_translated_transcript(file_path)
+            
+            # Check for existing transcript and update UI accordingly
+            self.update_transcript_ui_state(file_path)
+            
             # Update export button state
             self.update_export_button_state()
+            self.update_start_process_button_state()
         else:
             # Bulk mode
             self.show_bulk_mode(file_paths)
@@ -356,50 +508,141 @@ class MetadataPanel(QWidget):
                 self.lbl_filename.setText(f"{len(file_paths)} FILES SELECTED")
 
     def load_transcript(self, file_path):
-        """Load and display the full transcript from database."""
+        """Load and display the full transcript from database.
+        Shows original transcript as-is: English in English, other languages in native text."""
         if not file_path:
-            self.input_transcript.clear()
+            self.input_transcript_original.clear()
             return
         
         try:
             from core.database import Database
+            from core.translator import detect_segment_language
             db = Database()
             meta = db.get_video_metadata(file_path)
             transcript_data = meta.get("transcript", [])
             
             if transcript_data and isinstance(transcript_data, list):
                 # Format transcript with timestamps
+                # For mixed-language: show English in English, other languages in native text
                 transcript_lines = []
                 for seg in transcript_data:
                     start_time = seg.get("start", 0)
                     text = seg.get("text", "").strip()
                     if text:
+                        # Detect language if not already stored
+                        lang = detect_segment_language(seg)
+                        
+                        # Format time as MM:SS
+                        minutes = int(start_time // 60)
+                        seconds = int(start_time % 60)
+                        time_str = f"[{minutes:02d}:{seconds:02d}]"
+                        
+                        # Optionally add language indicator for non-English segments
+                        # (can be removed if user prefers cleaner display)
+                        if lang and lang != 'en':
+                            lang_label = lang.upper()
+                            transcript_lines.append(f"{time_str} [{lang_label}] {text}")
+                        else:
+                            transcript_lines.append(f"{time_str} {text}")
+                
+                full_transcript = "\n".join(transcript_lines)
+                self.input_transcript_original.setText(full_transcript)
+                self.original_segments = transcript_data
+            else:
+                self.input_transcript_original.clear()
+                self.input_transcript_original.setPlaceholderText("No transcript available. Check 'Transcribe' and click 'Start Process' to transcribe audio.")
+        except Exception as e:
+            logger.error(f"Error loading transcript: {e}")
+            self.input_transcript_original.clear()
+    
+    def load_translated_transcript(self, file_path):
+        """Load and display the translated transcript from database if available.
+        The translated transcript should already be all in English (English segments kept as-is,
+        non-English segments translated)."""
+        if not file_path:
+            self.input_transcript_translated.clear()
+            return
+        
+        try:
+            from core.database import Database
+            db = Database()
+            meta = db.get_video_metadata(file_path)
+            translated_data = meta.get("transcript_translated", [])
+            translation_method = meta.get("translation_method", "whisper")
+            
+            if translated_data and isinstance(translated_data, list):
+                # The translated transcript should already be all in English
+                # (English segments unchanged, non-English segments translated)
+                # But add safety check to filter out any Hindi that might have slipped through
+                
+                # Format transcript with timestamps
+                # Show ALL segments - don't filter out Hindi, but mark them
+                transcript_lines = []
+                hindi_segments_found = 0
+                for seg in translated_data:
+                    start_time = seg.get("start", 0)
+                    text = seg.get("text", "").strip()
+                    if text:
+                        # Check if segment still contains Hindi
+                        has_hindi = any('\u0900' <= char <= '\u097F' for char in text)
+                        if has_hindi:
+                            hindi_segments_found += 1
+                            logger.warning(f"Hindi text found in translated segment: {text[:50]}...")
+                            # Don't filter it out - show it with a warning marker
+                            text = f"[⚠ Translation incomplete] {text}"
+                        
                         # Format time as MM:SS
                         minutes = int(start_time // 60)
                         seconds = int(start_time % 60)
                         time_str = f"[{minutes:02d}:{seconds:02d}]"
                         transcript_lines.append(f"{time_str} {text}")
                 
-                full_transcript = "\n".join(transcript_lines)
-                self.input_transcript.setText(full_transcript)
+                if hindi_segments_found > 0:
+                    logger.warning(f"Found {hindi_segments_found} segments with Hindi text in English translation tab")
+                    # Show a warning to the user
+                    header_note = f"[⚠ Warning: {hindi_segments_found} segment(s) still contain Hindi - translation may be incomplete. Please retry translation.]\n\n"
+                else:
+                    header_note = ""
+                
+                if transcript_lines:
+                    full_transcript = "\n".join(transcript_lines)
+                    # Add header showing translation method
+                    method_text = "DeepL" if translation_method == "deepl" else "Whisper"
+                    header = f"[Translated with {method_text}]\n\n"
+                    self.input_transcript_translated.setText(header_note + header + full_transcript)
+                    # Store all segments (including those with Hindi - they're marked)
+                    self.translated_segments = translated_data
+                else:
+                    self.input_transcript_translated.clear()
+                    self.input_transcript_translated.setPlaceholderText("Translation available but no text to display.")
             else:
-                self.input_transcript.clear()
-                self.input_transcript.setPlaceholderText("No transcript available. Transcribe audio to see full dialogue here.")
+                self.input_transcript_translated.clear()
+                self.input_transcript_translated.setPlaceholderText("No translation available. Check 'Translate to English' and click 'Start Process' to translate.")
         except Exception as e:
-            print(f"Error loading transcript: {e}")
-            self.input_transcript.clear()
+            logger.error(f"Error loading translated transcript: {e}")
+            self.input_transcript_translated.clear()
 
     def clear(self):
         self.current_file_path = None
         self.lbl_filename.setText("NO SELECTION")
         self.tag_input_widget.clear()
         self.input_summary.clear()
-        self.input_transcript.clear()
+        self.input_transcript_original.clear()
+        self.input_transcript_translated.clear()
+        self.original_segments = None
+        self.translated_segments = None
         self.btn_edit.setEnabled(False)
         self.btn_edit.setChecked(False)
         self.toggle_edit_mode(False)
+        self.deepl_status_label.hide()
+        # Reset checkbox states
+        self.checkbox_transcribe.setChecked(True)
+        self.checkbox_transcribe.setText("Transcribe")
+        self.checkbox_translate.setChecked(False)
+        self.checkbox_translate.setEnabled(True)
         # Update export button state
         self.update_export_button_state()
+        self.update_start_process_button_state()
     
     def update_export_button_state(self):
         """Enable/disable export button based on whether transcript exists."""
@@ -412,6 +655,110 @@ class MetadataPanel(QWidget):
         meta = db.get_video_metadata(self.current_file_path)
         has_transcript = bool(meta.get("transcript"))
         self.btn_export_srt.setEnabled(has_transcript)
+    
+    def update_transcript_ui_state(self, file_path):
+        """Update UI based on existing transcript/translation status."""
+        if not file_path:
+            return
+        
+        try:
+            from core.database import Database
+            db = Database()
+            meta = db.get_video_metadata(file_path)
+            has_transcript = bool(meta.get("transcript"))
+            has_translation = bool(meta.get("transcript_translated"))
+            
+            # Update checkbox states based on what exists
+            if has_transcript:
+                # If transcript exists, uncheck transcribe by default (user can re-check to re-transcribe)
+                self.checkbox_transcribe.setChecked(False)
+                self.checkbox_transcribe.setText("Re-transcribe")
+                # Enable translate checkbox
+                self.checkbox_translate.setEnabled(True)
+                # If translation doesn't exist, check translate by default
+                if not has_translation:
+                    self.checkbox_translate.setChecked(True)
+                else:
+                    # Translation exists, uncheck by default (user can re-check to re-translate)
+                    self.checkbox_translate.setChecked(False)
+            else:
+                # No transcript, check transcribe by default
+                self.checkbox_transcribe.setChecked(True)
+                self.checkbox_transcribe.setText("Transcribe")
+                # Can't translate without transcript
+                self.checkbox_translate.setChecked(False)
+                self.checkbox_translate.setEnabled(False)
+        except Exception as e:
+            logger.error(f"Error updating transcript UI state: {e}")
+    
+    def update_deepl_status(self):
+        """Update DeepL status indicator."""
+        if not self.current_file_path:
+            self.deepl_status_label.hide()
+            return
+        
+        try:
+            from config import DEEPL_API_KEY
+            from core.translator import get_translator
+            
+            # Check if DeepL is available
+            deepl_translator = get_translator(DEEPL_API_KEY)
+            if deepl_translator and deepl_translator.available:
+                self.deepl_status_label.setText("🌐 DeepL translation available")
+                self.deepl_status_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {COLORS['success']};
+                        font-size: 10px;
+                        font-style: italic;
+                        padding: 4px 0px;
+                    }}
+                """)
+            else:
+                self.deepl_status_label.setText("⚠ Using Whisper translation (DeepL not configured)")
+                self.deepl_status_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {COLORS['warning']};
+                        font-size: 10px;
+                        font-style: italic;
+                        padding: 4px 0px;
+                    }}
+                """)
+            
+            # Check if file already has translation and show method used
+            from core.database import Database
+            db = Database()
+            meta = db.get_video_metadata(self.current_file_path)
+            translation_method = meta.get("translation_method")
+            if translation_method:
+                method_text = "DeepL" if translation_method == "deepl" else "Whisper"
+                self.deepl_status_label.setText(f"🌐 Translation method: {method_text}")
+            
+            self.deepl_status_label.show()
+        except Exception as e:
+            logger.error(f"Error updating DeepL status: {e}")
+            self.deepl_status_label.hide()
+    
+    def update_start_process_button_state(self):
+        """Enable/disable start process button."""
+        if not self.current_file_path:
+            self.btn_start_process.setEnabled(False)
+            return
+        
+        # Enable if we have a valid video file and at least one checkbox is checked
+        if os.path.exists(self.current_file_path) and (self.checkbox_transcribe.isChecked() or self.checkbox_translate.isChecked()):
+            self.btn_start_process.setEnabled(True)
+        else:
+            self.btn_start_process.setEnabled(False)
+        
+        # Enable translate checkbox if transcript exists
+        try:
+            from core.database import Database
+            db = Database()
+            meta = db.get_video_metadata(self.current_file_path)
+            has_transcript = bool(meta.get("transcript"))
+            self.checkbox_translate.setEnabled(has_transcript or self.checkbox_transcribe.isChecked())
+        except:
+            pass
 
     def handle_save(self):
         if not self.current_file_path: return
@@ -433,11 +780,23 @@ class MetadataPanel(QWidget):
             QMessageBox.warning(self, "No File", "No file selected.")
             return
         
-        # Check if transcript exists
+        # Check which tab is active to determine what to export
+        current_tab = self.transcript_tabs.currentIndex()
+        use_translated = (current_tab == 1) and self.translated_segments
+        
+        # Get transcript data
         from core.database import Database
         db = Database()
         meta = db.get_video_metadata(self.current_file_path)
-        transcript = meta.get("transcript", [])
+        
+        if use_translated and self.translated_segments:
+            transcript = self.translated_segments
+            default_suffix = "_translated"
+        else:
+            transcript = meta.get("transcript", [])
+            if not transcript and self.original_segments:
+                transcript = self.original_segments
+            default_suffix = ""
         
         if not transcript:
             QMessageBox.information(self, "No Transcript", 
@@ -446,7 +805,7 @@ class MetadataPanel(QWidget):
         
         # Choose export location
         base_name = os.path.splitext(os.path.basename(self.current_file_path))[0]
-        default_path = os.path.join(os.path.dirname(self.current_file_path), f"{base_name}.srt")
+        default_path = os.path.join(os.path.dirname(self.current_file_path), f"{base_name}{default_suffix}.srt")
         
         export_path, _ = QFileDialog.getSaveFileName(
             self, "Export SRT", default_path, "SRT Files (*.srt)"
@@ -455,9 +814,14 @@ class MetadataPanel(QWidget):
         if not export_path:
             return
         
-        # Export
+        # Export - both use sentence-aware export (one sentence per subtitle)
         from core.srt_exporter import SRTExporter
-        success = SRTExporter.export_transcript_to_srt(transcript, export_path)
+        if use_translated:
+            # For translated, use split_segments_into_sentences to preserve timing
+            success = SRTExporter.export_translated_srt(transcript, export_path, merge_segments=False)
+        else:
+            # For original, also split into sentences for proper SRT format
+            success = SRTExporter.export_transcript_to_srt(transcript, export_path, one_sentence_per_subtitle=True)
         
         if success:
             QMessageBox.information(self, "Export Complete", 
@@ -465,3 +829,264 @@ class MetadataPanel(QWidget):
         else:
             QMessageBox.warning(self, "Export Failed", 
                               "Failed to export SRT file. Please check the file path and try again.")
+    
+    def handle_start_process(self):
+        """Handle start process button click."""
+        if not self.current_file_path:
+            QMessageBox.warning(self, "No File", "No file selected.")
+            return
+        
+        if not os.path.exists(self.current_file_path):
+            QMessageBox.warning(self, "File Not Found", "The selected file does not exist.")
+            return
+        
+        # Check if at least one option is selected
+        if not self.checkbox_transcribe.isChecked() and not self.checkbox_translate.isChecked():
+            QMessageBox.warning(self, "No Option Selected", "Please select at least one option (Transcribe or Translate).")
+            return
+        
+        # Check if worker is already running
+        if self.translate_worker and self.translate_worker.isRunning():
+            QMessageBox.information(self, "Already Running", 
+                                  "Processing is already in progress.")
+            return
+        
+        # Try to integrate with main workflow if available
+        # Get main window reference if possible
+        main_window = None
+        try:
+            from PyQt6.QtWidgets import QApplication
+            for widget in QApplication.topLevelWidgets():
+                if hasattr(widget, 'workflow_manager') and hasattr(widget, 'project_path'):
+                    main_window = widget
+                    break
+        except:
+            pass
+        
+        # If main workflow is running, add to queue instead
+        if main_window and hasattr(main_window, 'workflow_manager') and main_window.workflow_manager.is_running:
+            # Add to workflow queue
+            from core.workflow_manager import OperationType
+            files = [self.current_file_path]
+            
+            if self.checkbox_transcribe.isChecked():
+                main_window.workflow_manager.add_operation(OperationType.TRANSCRIBE_AUDIO, files, smart_filter=False)
+            
+            if self.checkbox_translate.isChecked():
+                main_window.workflow_manager.add_operation(OperationType.TRANSLATE_AUDIO, files, smart_filter=False)
+            
+            # Update workflow display
+            if hasattr(main_window, 'update_workflow_queue_display'):
+                main_window.update_workflow_queue_display()
+            if hasattr(main_window, '_show_workflow_panel'):
+                main_window._show_workflow_panel()
+            
+            QMessageBox.information(self, "Added to Queue", 
+                                  "Operation added to workflow queue. It will be processed when the current workflow completes.")
+            return
+        
+        # Get project path from database
+        try:
+            from core.database import Database
+            db = Database()
+            project_path = getattr(db, 'project_path', None)
+            if not project_path:
+                # Fallback: use directory containing the video file
+                project_path = os.path.dirname(self.current_file_path)
+        except Exception as e:
+            logger.warning(f"Could not get project path from database: {e}")
+            # Fallback: use directory containing the video file
+            project_path = os.path.dirname(self.current_file_path)
+        
+        # Determine what to do
+        should_transcribe = self.checkbox_transcribe.isChecked()
+        should_translate = self.checkbox_translate.isChecked()
+        
+        # Create progress dialog
+        action_text = []
+        if should_transcribe:
+            action_text.append("transcribing")
+        if should_translate:
+            action_text.append("translating")
+        action_str = " and ".join(action_text)
+        
+        self.progress_dialog = QProgressDialog(f"{action_str.capitalize()}...", "Cancel", 0, 100, self)
+        self.progress_dialog.setWindowTitle("Processing")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.progress_dialog.setMinimumWidth(400)
+        self.progress_dialog.setCancelButton(None)  # Disable cancel for now (can be enabled later)
+        self.progress_dialog.show()
+        
+        # Create and start worker
+        from workers.transcribe_translate_worker import TranscribeTranslateWorker
+        self.translate_worker = TranscribeTranslateWorker(
+            self.current_file_path,
+            project_path,
+            deepl_api_key=DEEPL_API_KEY,
+            mode="accuracy",
+            should_transcribe=should_transcribe,
+            should_translate=should_translate
+        )
+        
+        # Connect signals
+        self.translate_worker.log_signal.connect(self.on_translate_log)
+        self.translate_worker.progress_signal.connect(self.on_translate_progress)
+        self.translate_worker.finished_signal.connect(self.on_translate_finished)
+        self.translate_worker.transcription_complete_signal.connect(self.on_transcription_complete)
+        self.translate_worker.translation_complete_signal.connect(self.on_translation_complete)
+        
+        # Disable button and checkboxes during processing
+        self.btn_start_process.setEnabled(False)
+        self.checkbox_transcribe.setEnabled(False)
+        self.checkbox_translate.setEnabled(False)
+        
+        # Start worker
+        self.translate_worker.start()
+    
+    def on_translate_log(self, message: str):
+        """Handle log messages from translation worker."""
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.setLabelText(message)
+        logger.info(f"Translation: {message}")
+    
+    def on_translate_progress(self, value: int):
+        """Handle progress updates from translation worker."""
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.setValue(value)
+    
+    def on_translate_finished(self, success: bool, error_msg: str):
+        """Handle translation worker completion."""
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.close()
+        
+        # Re-enable controls
+        self.btn_start_process.setEnabled(True)
+        self.checkbox_transcribe.setEnabled(True)
+        self.checkbox_translate.setEnabled(True)
+        self.update_start_process_button_state()
+        
+        if success:
+            # Update export button state after successful transcription/translation
+            self.update_export_button_state()
+            
+            # Show success message
+            message = "Processing completed successfully!"
+            if self.translated_segments:
+                message += "\n\nWould you like to export the translated SRT file?"
+                reply = QMessageBox.question(
+                    self,
+                    "Processing Complete",
+                    message,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    self.export_translated_srt()
+            else:
+                QMessageBox.information(self, "Processing Complete", message)
+        else:
+            QMessageBox.warning(
+                self,
+                "Processing Failed",
+                f"Processing failed: {error_msg}"
+            )
+    
+    def on_transcription_complete(self, original_segments: list):
+        """Handle transcription completion with original language segments."""
+        self.original_segments = original_segments
+        
+        # Update original transcript tab
+        if original_segments:
+            transcript_lines = []
+            for seg in original_segments:
+                start_time = seg.get("start", 0)
+                text = seg.get("text", "").strip()
+                if text:
+                    minutes = int(start_time // 60)
+                    seconds = int(start_time % 60)
+                    time_str = f"[{minutes:02d}:{seconds:02d}]"
+                    transcript_lines.append(f"{time_str} {text}")
+            
+            full_transcript = "\n".join(transcript_lines)
+            self.input_transcript_original.setText(full_transcript)
+            
+            # Switch to original tab to show the transcription
+            self.transcript_tabs.setCurrentIndex(0)
+        
+        # Update export button state after transcription completes
+        self.update_export_button_state()
+    
+    def on_translation_complete(self, translated_segments: list):
+        """Handle translation completion with segments."""
+        self.translated_segments = translated_segments
+        
+        # Update translated transcript tab
+        if translated_segments and len(translated_segments) > 0:
+            transcript_lines = []
+            for seg in translated_segments:
+                start_time = seg.get("start", 0)
+                text = seg.get("text", "").strip()
+                if text:
+                    minutes = int(start_time // 60)
+                    seconds = int(start_time % 60)
+                    time_str = f"[{minutes:02d}:{seconds:02d}]"
+                    transcript_lines.append(f"{time_str} {text}")
+            
+            if transcript_lines:
+                full_transcript = "\n".join(transcript_lines)
+                self.input_transcript_translated.setText(full_transcript)
+                logger.info(f"Updated English tab with {len(translated_segments)} translated segments")
+                
+                # Switch to translated tab if translation was done
+                if self.checkbox_translate.isChecked():
+                    self.transcript_tabs.setCurrentIndex(1)
+            else:
+                logger.warning("Translation completed but no text to display")
+                self.input_transcript_translated.setText("Translation completed but no text was generated.")
+        else:
+            logger.warning("Translation completed but no segments received")
+            self.input_transcript_translated.setText("Translation failed or returned no results.")
+        
+        # Update export button state after translation completes
+        self.update_export_button_state()
+    
+    def export_translated_srt(self):
+        """Export the translated SRT file."""
+        if not self.translated_segments:
+            QMessageBox.warning(self, "No Translation", "No translated segments available.")
+            return
+        
+        if not self.current_file_path:
+            QMessageBox.warning(self, "No File", "No file selected.")
+            return
+        
+        # Choose export location
+        base_name = os.path.splitext(os.path.basename(self.current_file_path))[0]
+        default_path = os.path.join(os.path.dirname(self.current_file_path), f"{base_name}_translated.srt")
+        
+        export_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Translated SRT", default_path, "SRT Files (*.srt)"
+        )
+        
+        if not export_path:
+            return
+        
+        # Export using sentence-aware method (preserves timing)
+        from core.srt_exporter import SRTExporter
+        success = SRTExporter.export_translated_srt(
+            self.translated_segments,
+            export_path,
+            merge_segments=False  # Preserve original timing instead of redistributing
+        )
+        
+        if success:
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Translated SRT file exported successfully:\n{export_path}"
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "Export Failed",
+                "Failed to export translated SRT file. Please check the file path and try again."
+            )

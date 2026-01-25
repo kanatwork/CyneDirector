@@ -405,3 +405,6 @@ class QueryBuilderDialog(QDialog):
         return "".join(self.query_parts).strip()
 
 
+
+
+

@@ -327,6 +327,29 @@ class MainWindow(QMainWindow):
         """)
         workflow_layout.addWidget(self.checkbox_audio)
         
+        # Translate Checkbox
+        self.checkbox_translate = QCheckBox("Translate")
+        self.checkbox_translate.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS['text_main']};
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 4px;
+                background: {COLORS['bg_input']};
+            }}
+            QCheckBox::indicator:checked {{
+                background: {COLORS['accent']};
+                border-color: {COLORS['accent']};
+            }}
+        """)
+        self.checkbox_translate.setToolTip("Translate transcripts to English (requires existing transcript)")
+        workflow_layout.addWidget(self.checkbox_translate)
+        
         # Divider
         divider1 = QFrame()
         divider1.setFrameShape(QFrame.Shape.VLine)
@@ -846,6 +869,14 @@ class MainWindow(QMainWindow):
                                                    smart_filter=False)
                 added_any = True
         
+        if self.checkbox_translate.isChecked():
+            needed_ops = self.workflow_manager.get_files_needing_operations(files)
+            if len(needed_ops[OperationType.TRANSLATE_AUDIO]) > 0:
+                self.workflow_manager.add_operation(OperationType.TRANSLATE_AUDIO,
+                                                   needed_ops[OperationType.TRANSLATE_AUDIO],
+                                                   smart_filter=False)
+                added_any = True
+        
         if not added_any:
             self.toast_manager.show_toast("All selected files already have the requested data.", "info")
             return
@@ -891,11 +922,16 @@ class MainWindow(QMainWindow):
         act_transcribe.setEnabled(len(needed_ops[OperationType.TRANSCRIBE_AUDIO]) > 0)
         act_transcribe.triggered.connect(lambda: self.add_to_workflow(OperationType.TRANSCRIBE_AUDIO, files))
         
+        act_translate = menu.addAction("🌐 Translate to English")
+        act_translate.setEnabled(len(needed_ops[OperationType.TRANSLATE_AUDIO]) > 0)
+        act_translate.triggered.connect(lambda: self.add_to_workflow(OperationType.TRANSLATE_AUDIO, files))
+        
         menu.addSeparator()
         
         act_all = menu.addAction("➕ Add All Needed")
         has_any = (len(needed_ops[OperationType.INDEX_VISUALS]) > 0 or
-                   len(needed_ops[OperationType.TRANSCRIBE_AUDIO]) > 0)
+                   len(needed_ops[OperationType.TRANSCRIBE_AUDIO]) > 0 or
+                   len(needed_ops[OperationType.TRANSLATE_AUDIO]) > 0)
         act_all.setEnabled(has_any)
         act_all.triggered.connect(lambda: self.add_all_needed_to_workflow(files, needed_ops))
         
@@ -939,9 +975,13 @@ class MainWindow(QMainWindow):
     def add_all_needed_to_workflow(self, files: list, needed_ops: dict):
         """Add all needed operations to workflow."""
         added_count = 0
-        for op_type, op_files in needed_ops.items():
-            if op_files and self.workflow_manager.add_operation(op_type, op_files, smart_filter=False):
-                added_count += 1
+        # Process in order: visuals, transcription, then translation
+        operation_order = [OperationType.INDEX_VISUALS, OperationType.TRANSCRIBE_AUDIO, OperationType.TRANSLATE_AUDIO]
+        for op_type in operation_order:
+            if op_type in needed_ops:
+                op_files = needed_ops[op_type]
+                if op_files and self.workflow_manager.add_operation(op_type, op_files, smart_filter=False):
+                    added_count += 1
         
         if added_count > 0:
             self.update_workflow_queue_display()
@@ -1002,7 +1042,8 @@ class MainWindow(QMainWindow):
             
             icon_map = {
                 'Index Visuals': '📷',
-                'Transcribe Audio': '🎤'
+                'Transcribe Audio': '🎤',
+                'Translate Audio': '🌐'
             }
             icon = icon_map.get(item_data['type_display'], '⚙')
             
@@ -1414,6 +1455,17 @@ class MainWindow(QMainWindow):
             self._start_indexer_worker(file_paths)
         elif op_type == OperationType.TRANSCRIBE_AUDIO:
             self._start_transcriber_worker(file_paths)
+        elif op_type == OperationType.TRANSLATE_AUDIO:
+            self._start_translate_worker(file_paths)
+    
+    def on_translation_complete(self, translated_segments: list):
+        """Handle translation completion."""
+        # Update UI to show translation is complete
+        if hasattr(self, 'worker') and self.worker:
+            # Get the file path from the worker
+            if hasattr(self.worker, 'video_path'):
+                self.tree.mark_translation_done(self.worker.video_path)
+        self._refresh_tree_highlighting()
 
     def setup_media_page(self):
         layout = QVBoxLayout(self.media_page)
@@ -1901,6 +1953,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'checkbox_video'):
             self.checkbox_video.setDisabled(locked)
             self.checkbox_audio.setDisabled(locked)
+            if hasattr(self, 'checkbox_translate'):
+                self.checkbox_translate.setDisabled(locked)
             self.btn_start_indexing.setDisabled(locked)
             self.radio_speed.setDisabled(locked)
             self.radio_accuracy.setDisabled(locked)
@@ -2120,6 +2174,83 @@ class MainWindow(QMainWindow):
         self.worker.finished_signal.connect(self.worker_finished)
         self.worker.file_finished_signal.connect(self.update_audio_status)
         self.worker.start()
+    
+    def _start_translate_worker(self, files):
+        """Start translation worker (used by workflow manager)."""
+        if self.worker and self.worker.isRunning(): return
+        
+        from workers.transcribe_translate_worker import TranscribeTranslateWorker
+        from config import DEEPL_API_KEY
+        mode = getattr(self.workflow_manager, 'current_mode', 'speed')
+        
+        # Process all files sequentially
+        # Store files list for batch processing
+        if files:
+            self.translation_files = files
+            self.current_translation_index = 0
+            self._process_next_translation_file()
+    
+    def _process_next_translation_file(self):
+        """Process next file in translation batch."""
+        if not hasattr(self, 'translation_files') or not hasattr(self, 'current_translation_index'):
+            return
+        
+        if self.current_translation_index >= len(self.translation_files):
+            # All files processed
+            self.worker_finished()
+            return
+        
+        file_path = self.translation_files[self.current_translation_index]
+        from workers.transcribe_translate_worker import TranscribeTranslateWorker
+        from config import DEEPL_API_KEY
+        mode = getattr(self.workflow_manager, 'current_mode', 'speed')
+        
+        # Calculate base progress for this file
+        total_files = len(self.translation_files)
+        base_progress = int((self.current_translation_index / total_files) * 100)
+        
+        self.worker = TranscribeTranslateWorker(
+            file_path,
+            self.project_path,
+            deepl_api_key=DEEPL_API_KEY,
+            mode=mode,
+            should_transcribe=False,  # Only translate, don't re-transcribe
+            should_translate=True
+        )
+        
+        # Wrap progress signal to account for batch processing
+        def update_batch_progress(progress):
+            # Scale progress to account for current file position in batch
+            scaled_progress = base_progress + int((progress / 100) * (100 / total_files))
+            self.update_progress(scaled_progress)
+        
+        self.worker.progress_signal.connect(update_batch_progress)
+        self.worker.log_signal.connect(self.update_log_status)
+        # Connect finished to process next file instead of worker_finished
+        self.worker.finished_signal.connect(self.on_translation_file_finished)
+        self.worker.translation_complete_signal.connect(self.on_translation_complete)
+        self.worker.start()
+    
+    def on_translation_file_finished(self, success: bool, error_msg: str):
+        """Handle completion of a single translation file, then process next."""
+        if hasattr(self, 'current_translation_index') and hasattr(self, 'translation_files'):
+            file_path = self.translation_files[self.current_translation_index]
+            if success:
+                self.tree.mark_translation_done(file_path)
+                self.update_audio_status(file_path)  # Refresh status
+            self.current_translation_index += 1
+            
+            # Update progress
+            total_files = len(self.translation_files)
+            progress = int((self.current_translation_index / total_files) * 100)
+            self.update_progress(progress)
+            
+            # Process next file
+            if self.current_translation_index < len(self.translation_files):
+                self._process_next_translation_file()
+            else:
+                # All files done
+                self.worker_finished()
     
     # Direct processing methods (quick actions)
     def run_indexing_direct(self):

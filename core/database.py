@@ -174,6 +174,25 @@ class Database:
         data = self._get_data(video_path)
         data["transcript"] = transcript_list
         self._save_data(video_path, data)
+    
+    def ensure_segment_languages(self, video_path):
+        """Ensure all transcript segments have language detection.
+        Useful for existing transcripts that were created before language detection was added."""
+        data = self._get_data(video_path)
+        transcript = data.get("transcript", [])
+        if not transcript or not isinstance(transcript, list):
+            return
+        
+        updated = False
+        from core.translator import detect_segment_language
+        for seg in transcript:
+            if 'language' not in seg:
+                detect_segment_language(seg)
+                updated = True
+        
+        if updated:
+            data["transcript"] = transcript
+            self._save_data(video_path, data)
 
     def save_summary(self, video_path, summary_text):
         data = self._get_data(video_path)

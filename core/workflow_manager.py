@@ -7,6 +7,7 @@ from core.database import Database
 class OperationType(Enum):
     INDEX_VISUALS = "index_visuals"
     TRANSCRIBE_AUDIO = "transcribe_audio"
+    TRANSLATE_AUDIO = "translate_audio"
 
 class OperationStatus(Enum):
     PENDING = "pending"
@@ -138,6 +139,16 @@ class WorkflowManager(QObject):
             elif op_type == OperationType.TRANSCRIBE_AUDIO:
                 # Need transcription if: no transcript OR file was modified since last scan
                 if not meta.get('transcript') or file_modified:
+                    filtered.append(path)
+            elif op_type == OperationType.TRANSLATE_AUDIO:
+                # Need translation if: has transcript but no translation OR file was modified since last translation
+                has_transcript = bool(meta.get('transcript'))
+                has_translation = bool(meta.get('transcript_translated'))
+                # Check if translation was done after last file modification
+                translation_timestamp = meta.get('translation_timestamp', 0)
+                translation_outdated = file_mtime > translation_timestamp if translation_timestamp > 0 else True
+                
+                if has_transcript and (not has_translation or translation_outdated):
                     filtered.append(path)
         
         return filtered
@@ -347,7 +358,8 @@ class WorkflowManager(QObject):
         import os
         result = {
             OperationType.INDEX_VISUALS: [],
-            OperationType.TRANSCRIBE_AUDIO: []
+            OperationType.TRANSCRIBE_AUDIO: [],
+            OperationType.TRANSLATE_AUDIO: []
         }
         
         for path in file_paths:
@@ -371,6 +383,15 @@ class WorkflowManager(QObject):
             # Need transcription if: no transcript OR file was modified
             if not meta.get('transcript') or file_modified:
                 result[OperationType.TRANSCRIBE_AUDIO].append(path)
+            
+            # Need translation if: has transcript but no translation OR translation is outdated
+            has_transcript = bool(meta.get('transcript'))
+            has_translation = bool(meta.get('transcript_translated'))
+            translation_timestamp = meta.get('translation_timestamp', 0)
+            translation_outdated = file_mtime > translation_timestamp if translation_timestamp > 0 else True
+            
+            if has_transcript and (not has_translation or translation_outdated):
+                result[OperationType.TRANSLATE_AUDIO].append(path)
         
         return result
 

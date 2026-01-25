@@ -191,3 +191,12 @@ STYLESHEET = f"""
 # Database Config
 DB_FOLDER_NAME = "_cyne_db"
 THUMBNAIL_SIZE = (320, 180)
+
+# Translation Config
+# DeepL API key (optional - leave empty to use Whisper built-in translation)
+# Get free API key at: https://www.deepl.com/pro-api
+DEEPL_API_KEY = os.environ.get("DEEPL_API_KEY", "83ce02fd-8a82-4399-ac2d-d2ce4ad41055:fx")  # Can also be set via environment variable
+
+# Translation method preference: "deepl" or "whisper"
+# If DeepL API key is set, it will be used. Otherwise, Whisper translation is used.
+TRANSLATION_METHOD = "deepl" if DEEPL_API_KEY else "whisper"
