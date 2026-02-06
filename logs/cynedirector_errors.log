@@ -1,0 +1,117 @@
+2025-12-30 22:44:47 - CyneDirector.test - ERROR - Error message
+2025-12-30 22:45:28 - CyneDirector.test - ERROR - Error message
+2025-12-30 22:47:05 - CyneDirector.test - ERROR - Error message
+2025-12-30 22:48:40 - CyneDirector.test - ERROR - Error message
+2025-12-30 22:50:22 - CyneDirector.test - ERROR - Error message
+2025-12-30 22:53:07 - CyneDirector.__main__ - ERROR - Exception during MainWindow creation
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20/main.py", line 100, in main
+    from gui.main_window import MainWindow
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 17, in <module>
+    from gui.search_tab import SearchTab
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\search_tab.py", line 17, in <module>
+    from gui.player_window import PlayerWindow
+ImportError: cannot import name 'PlayerWindow' from 'gui.player_window' (C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\player_window.py)
+2025-12-30 22:55:43 - CyneDirector.__main__ - ERROR - Exception during MainWindow creation
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20/main.py", line 103, in main
+    window = MainWindow(project_path, project_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 71, in __init__
+    self.setup_ui()
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 537, in setup_ui
+    self.setup_media_page()
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 1381, in setup_media_page
+    from gui.embedded_player import EmbeddedPlayerWidget
+ImportError: cannot import name 'EmbeddedPlayerWidget' from 'gui.embedded_player' (C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\embedded_player.py)
+2025-12-30 22:59:30 - CyneDirector.__main__ - CRITICAL - CRASH: name 'get_optimal_batch_size' is not defined
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 1306, in on_workflow_operation_started
+    self._start_worker_for_operation(op_type, file_paths)
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 1336, in _start_worker_for_operation
+    self._start_indexer_worker(file_paths)
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 2026, in _start_indexer_worker
+    self.worker = IndexerWorker(files, self.project_path, mode=mode)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\indexer.py", line 37, in __init__
+    self.batch_size = get_optimal_batch_size(base_batch_accuracy, min_batch=16, max_batch=64)
+                      ^^^^^^^^^^^^^^^^^^^^^^
+NameError: name 'get_optimal_batch_size' is not defined
+
+2025-12-30 23:01:52 - CyneDirector.__main__ - CRITICAL - CRASH: cannot access local variable 'os' where it is not associated with a value
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\indexer.py", line 117, in run
+    filename = os.path.basename(video_path)
+               ^^
+UnboundLocalError: cannot access local variable 'os' where it is not associated with a value
+
+2025-12-30 23:07:06 - CyneDirector.__main__ - CRITICAL - CRASH: cannot access local variable 'os' where it is not associated with a value
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\transcriber.py", line 59, in run
+    filename = os.path.basename(video_path)
+               ^^
+UnboundLocalError: cannot access local variable 'os' where it is not associated with a value
+
+2026-01-02 15:54:44 - CyneDirector.workers.transcribe_translate_worker - ERROR - Translation error: name 'get_whisper_translator' is not defined
+2026-01-02 16:04:28 - CyneDirector.workers.transcribe_translate_worker - ERROR - Translation error: name 'get_whisper_translator' is not defined
+2026-01-02 16:09:51 - CyneDirector.core.translator - ERROR - DeepL translation error: target_lang="EN" is deprecated, please use "EN-GB" or "EN-US"instead.
+2026-01-02 16:09:51 - CyneDirector.core.translator - ERROR - Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\core\translator.py", line 60, in translate
+    result = self.translator.translate_text(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\deepl\translator.py", line 458, in translate_text
+    request_data = self._check_language_and_formality(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\deepl\translator.py", line 305, in _check_language_and_formality
+    self._check_valid_languages(source_lang, target_lang)
+  File "c:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\deepl\translator.py", line 248, in _check_valid_languages
+    raise DeepLException(
+deepl.exceptions.DeepLException: target_lang="EN" is deprecated, please use "EN-GB" or "EN-US"instead.
+
+2026-01-02 16:09:51 - CyneDirector.workers.transcribe_translate_worker - ERROR - Translation error: target_lang="EN" is deprecated, please use "EN-GB" or "EN-US"instead.
+2026-01-02 16:09:51 - CyneDirector.workers.transcribe_translate_worker - ERROR - Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\transcribe_translate_worker.py", line 212, in _translate_transcript
+    translated_text = deepl_translator.translate(merged_text)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\core\translator.py", line 60, in translate
+    result = self.translator.translate_text(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\deepl\translator.py", line 458, in translate_text
+    request_data = self._check_language_and_formality(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\deepl\translator.py", line 305, in _check_language_and_formality
+    self._check_valid_languages(source_lang, target_lang)
+  File "c:\Users\kanis\AppData\Local\Programs\Python\Python311\Lib\site-packages\deepl\translator.py", line 248, in _check_valid_languages
+    raise DeepLException(
+deepl.exceptions.DeepLException: target_lang="EN" is deprecated, please use "EN-GB" or "EN-US"instead.
+
+2026-01-02 16:33:53 - CyneDirector.__main__ - ERROR - Exception during MainWindow creation
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20/main.py", line 100, in main
+    from gui.main_window import MainWindow
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 16, in <module>
+    from gui.media_tree import MediaTree
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\media_tree.py", line 93
+    self.signals.finished.emit(self.path, "Error", "--", "--:--", 
+    ^^^^
+IndentationError: expected an indented block after 'except' statement on line 91
+2026-01-02 16:51:02 - CyneDirector.core.translator - ERROR - Translation retry failed: Translation failed: text still contains Hindi characters after retry
+2026-01-02 16:51:02 - CyneDirector.core.translator - ERROR - Translation failed: Translation failed: Translation failed: text still contains Hindi characters after retry
+2026-01-02 16:56:29 - CyneDirector.core.translator - ERROR - Translation retry failed: Translation failed: text still contains Hindi characters after retry
+2026-01-02 16:56:29 - CyneDirector.core.translator - ERROR - Translation failed: Translation failed: Translation failed: text still contains Hindi characters after retry
+2026-01-15 12:01:29 - CyneDirector.__main__ - CRITICAL - CRASH: 'MediaTree' object has no attribute 'refresh_all_statuses'
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 1405, in on_workflow_finished
+    self._refresh_tree_highlighting()
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 1418, in _refresh_tree_highlighting
+    self.tree.refresh_all_statuses()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'MediaTree' object has no attribute 'refresh_all_statuses'
+
+2026-01-15 18:46:46 - CyneDirector.__main__ - ERROR - Exception during MainWindow creation
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\main.py", line 100, in main
+    from gui.main_window import MainWindow
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 4, in <module>
+    import cv2
+ModuleNotFoundError: No module named 'cv2'

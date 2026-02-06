@@ -1,0 +1,9 @@
+CYNEDIRECTOR V2.1.0 CRASH REPORT
+==============================
+Traceback (most recent call last):
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 1405, in on_workflow_finished
+    self._refresh_tree_highlighting()
+  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\gui\main_window.py", line 1418, in _refresh_tree_highlighting
+    self.tree.refresh_all_statuses()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'MediaTree' object has no attribute 'refresh_all_statuses'
