@@ -1,6 +1,10 @@
 # [FILE: config.py]
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file (if it exists)
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # --- Application Info ---
 APP_NAME = "CyneDirector"
@@ -193,10 +197,11 @@ DB_FOLDER_NAME = "_cyne_db"
 THUMBNAIL_SIZE = (320, 180)
 
 # Translation Config
-# DeepL API key (optional - leave empty to use Whisper built-in translation)
-# Get free API key at: https://www.deepl.com/pro-api
-DEEPL_API_KEY = os.environ.get("DEEPL_API_KEY", "83ce02fd-8a82-4399-ac2d-d2ce4ad41055:fx")  # Can also be set via environment variable
+# To use DeepL translation, set DEEPL_API_KEY in a .env file at the project root
+# or as a system environment variable. Get a free key at: https://www.deepl.com/pro-api
+# If no key is set, Whisper's built-in translation is used as a fallback.
+DEEPL_API_KEY = os.environ.get("DEEPL_API_KEY", "")
 
 # Translation method preference: "deepl" or "whisper"
-# If DeepL API key is set, it will be used. Otherwise, Whisper translation is used.
+# Automatically selects DeepL when a key is available, otherwise falls back to Whisper.
 TRANSLATION_METHOD = "deepl" if DEEPL_API_KEY else "whisper"

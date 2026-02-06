@@ -8,13 +8,34 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# --- PHASE 2: ARCHITECT OVERRIDES (RTX 5070 / BLACKWELL SUPPORT) ---
-# 1. Force PyTorch to treat the GPU as "Hopper" (Arch 9.0) if Blackwell (12.0) is missing.
-#    This allows the driver to JIT compile the kernels instead of crashing.
-os.environ["TORCH_CUDA_ARCH_LIST"] = "9.0" 
-
-# 2. Enable JIT Caching to prevent recompiling kernels on every launch
+# Enable JIT kernel caching to prevent recompiling on every launch
 os.environ["CUDA_CACHE_DISABLE"] = "0"
+
+
+def _detect_cuda_arch():
+    """Detect the GPU compute capability and set TORCH_CUDA_ARCH_LIST accordingly.
+
+    Supports: Turing (7.5), Ampere (8.0/8.6), Ada Lovelace (8.9),
+    Hopper (9.0), Blackwell (9.0+ / 10.x — mapped to 9.0 if unsupported).
+    """
+    if not torch.cuda.is_available():
+        return
+
+    major, minor = torch.cuda.get_device_capability(0)
+    arch = f"{major}.{minor}"
+
+    # Known compute capabilities PyTorch can target.
+    # If the detected arch is newer than what PyTorch knows, fall back to the
+    # highest supported arch so the JIT compiler can still produce valid kernels.
+    supported = ["7.5", "8.0", "8.6", "8.9", "9.0"]
+    if arch not in supported:
+        # GPU is newer than anything in the list — use the highest known arch
+        arch = supported[-1]
+
+    os.environ["TORCH_CUDA_ARCH_LIST"] = arch
+
+
+_detect_cuda_arch()
 
 class AIBackend:
     _instance = None
@@ -46,37 +67,35 @@ class AIBackend:
         return cls._instance
 
     def _force_gpu_initialization(self):
-        """
-        Phase 2 Logic: strictly enforces GPU usage.
-        Does NOT fallback to CPU. If GPU fails, we want to know why.
-        """
+        """Enforce GPU usage with a kernel smoke test. Fails fast if no GPU is found."""
         if not torch.cuda.is_available():
-            raise RuntimeError("❌ CRITICAL: No GPU detected. CPU mode is disabled for Phase 2.")
+            raise RuntimeError("CRITICAL: No CUDA GPU detected. CyneDirector requires a GPU.")
 
         try:
-            # 1. Enable TF32 (TensorFloat-32) - Huge speedup for RTX 40/50 series
+            # Enable TF32 (TensorFloat-32) - significant speedup on Ampere+ GPUs
             torch.backends.cuda.matmul.allow_tf32 = True
             torch.backends.cudnn.allow_tf32 = True
             torch.backends.cudnn.benchmark = True
-            
-            # 2. Kernel Validity Test (The "Smoke Test")
-            # We run a convolution to ensure the JIT compiler is working.
+
+            # Kernel smoke test — runs a convolution to verify JIT compilation works
             conv = torch.nn.Conv2d(1, 1, 3).cuda()
             dummy = torch.randn(1, 1, 10, 10).cuda()
             _ = conv(dummy)
-            
+
             device_name = torch.cuda.get_device_name(0)
+            major, minor = torch.cuda.get_device_capability(0)
+            arch_list = os.environ.get("TORCH_CUDA_ARCH_LIST", "unknown")
             print(f"AI ACCELERATION: ON ({device_name})")
-            print(f"   Architecture: Blackwell (Emulated as Hopper/9.0)")
+            print(f"   Compute capability: {major}.{minor} (targeting {arch_list})")
             print(f"   Precision: Float16 (TF32 Enabled)")
-            
+
             return "cuda", torch.float16
-            
+
         except RuntimeError as e:
             print(f"\nGPU KERNEL ERROR: {e}")
-            print("   The RTX 5070 requires the 'Nightly' PyTorch build or the overrides above.")
-            print("   Checking env vars: TORCH_CUDA_ARCH_LIST =", os.environ.get("TORCH_CUDA_ARCH_LIST"))
-            raise e # Crash intentionally so we don't accidentally run on CPU
+            print(f"   TORCH_CUDA_ARCH_LIST = {os.environ.get('TORCH_CUDA_ARCH_LIST')}")
+            print("   Try updating PyTorch: pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu126")
+            raise
 
     # --- 1. CLIP (Keywords) ---
     def load_clip(self):

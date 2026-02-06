@@ -1,6 +1,7 @@
-# Python
+# Python bytecode
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 *.so
 .Python
@@ -24,30 +25,26 @@ wheels/
 venv/
 env/
 ENV/
-.venv
+.venv/
 
 # IDE
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
-.cursor/
 
-# Logs and Crash Reports
-logs/*.log
-logs/*.txt
-logs/crash_*.txt
-*.log
+# Logs (keep directory via .gitkeep)
+logs/*
+!logs/.gitkeep
 
 # Project Dumps
 FULL_PROJECT_DUMP*.txt
 Project Dumps/
 
-# Database files (project-specific, but keep structure)
-# Uncomment if you don't want to track database files
-# *_cyne_db/
-# *.db
+# Database binary files
+_cyne_db/**/*.pkl
 
 # OS Files
 .DS_Store
@@ -58,7 +55,6 @@ desktop.ini
 *.tmp
 *.temp
 *.bak
-*.swp
 
 # Model cache (if stored locally)
 .cache/
@@ -79,10 +75,3 @@ htmlcov/
 # Environment variables
 .env
 .env.local
-
-# Version files (if auto-generated)
-0.20.0
-
-
-
-
