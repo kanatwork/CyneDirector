@@ -103,6 +103,15 @@ class IndexerWorker(QThread):
             self.log_signal.emit(f"Loading {blip_label} model for caption generation...")
             blip_model, blip_processor = ai.load_blip()
             self.log_signal.emit(f"{blip_label} model loaded successfully")
+
+            # Load YOLO for object detection (non-fatal if unavailable)
+            yolo_model = None
+            try:
+                self.log_signal.emit("Loading YOLOv8 for object detection...")
+                yolo_model = ai.load_yolo()
+                self.log_signal.emit("YOLOv8 model loaded successfully")
+            except Exception as yolo_err:
+                self.log_signal.emit(f"YOLOv8 unavailable ({yolo_err}), using CLIP fallback for objects")
         except Exception as e:
             self.log_signal.emit(f"CRITICAL: AI Load Error - {e}")
             self.finished_signal.emit()
@@ -301,8 +310,8 @@ class IndexerWorker(QThread):
             cap.release()
             
             # --- SAVE SCENE SEGMENTS FOR TEMPORAL SEARCH ---
+            scene_segments = []
             if detected_scenes:
-                scene_segments = []
                 scene_start = 0
                 for i, scene in enumerate(detected_scenes):
                     # Estimate scene end (next scene start or video end)
@@ -917,7 +926,46 @@ class IndexerWorker(QThread):
                                         detected_objects.append(object_desc)
                     except Exception as e:
                         print(f"Emotion/Object detection error: {e}")
-            
+
+            # --- PHASE 5b: YOLO OBJECT DETECTION ---
+            yolo_detections = []
+            if yolo_model and final_scenes:
+                self.log_signal.emit(f"  → Running YOLOv8 object detection...")
+                for i, scene in enumerate(final_scenes):
+                    if scene.get('best_frame') is None:
+                        continue
+                    try:
+                        yolo_results = yolo_model(scene['best_frame'], verbose=False)
+                        # Estimate timestamp from scene segments
+                        timestamp = 0
+                        if i < len(scene_segments):
+                            timestamp = scene_segments[i]['start']
+
+                        for result in yolo_results:
+                            boxes = result.boxes
+                            if boxes is None:
+                                continue
+                            for box in boxes:
+                                confidence = float(box.conf[0])
+                                if confidence < 0.4:
+                                    continue
+                                cls_id = int(box.cls[0])
+                                label = result.names[cls_id]
+                                bbox = box.xyxyn[0].tolist()  # Normalized [x1, y1, x2, y2]
+                                yolo_detections.append({
+                                    "label": label,
+                                    "confidence": round(confidence, 3),
+                                    "bbox": [round(c, 4) for c in bbox],
+                                    "timestamp": round(timestamp, 2),
+                                    "scene_index": i
+                                })
+                    except Exception as e:
+                        print(f"YOLO scene {i} error: {e}")
+
+                if yolo_detections:
+                    unique_labels = set(d['label'] for d in yolo_detections)
+                    self.log_signal.emit(f"  → YOLO detected {len(yolo_detections)} objects ({len(unique_labels)} unique: {', '.join(sorted(unique_labels)[:8])})")
+
             # Save tags, summary, shot type, emotions, and objects
             self.log_signal.emit(f"  → Saving {len(final_tags)} tags, summary, and context data...")
             db.save_tags(video_path, final_tags, final_summary)
@@ -926,6 +974,8 @@ class IndexerWorker(QThread):
                 db.update_metadata_key(video_path, "emotions", detected_emotions)
             if detected_objects:
                 db.update_metadata_key(video_path, "objects", detected_objects)
+            if yolo_detections:
+                db.update_metadata_key(video_path, "objects_yolo", yolo_detections)
             
             # Update last_scanned timestamp for incremental indexing
             try:

@@ -8,6 +8,7 @@ CyneDirector is an AI-powered video management and semantic search desktop appli
 - Semantic visual search using CLIP embeddings
 - Automatic speech transcription via Whisper
 - Scene description generation via BLIP-2
+- YOLOv8 object detection with bounding boxes
 - Translation of transcripts (DeepL or Whisper-based)
 - LLM-powered video summarization (Llama-3.2 / Phi-3 fallback)
 - Face recognition across videos
@@ -27,9 +28,9 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 
 | Module | Purpose |
 |---|---|
-| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, Whisper, LLM models. Auto-detects GPU compute capability at import time |
+| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, YOLOv8, Whisper, LLM models. Auto-detects GPU compute capability at import time |
 | `database.py` | SQLite (metadata, WAL mode) + ChromaDB (vector embeddings). Connection-per-thread via `threading.local()` |
-| `search_engine.py` | Multi-modal semantic search with query expansion, decomposition, pagination, caching |
+| `search_engine.py` | Multi-modal semantic search with query expansion, decomposition, YOLO object matching, pagination, caching |
 | `tags.py` | Tag hierarchy and vocabulary for visual indexing |
 | `translator.py` | Language detection and translation (DeepL / Whisper) |
 | `summary_generator.py` | LLM-based video summarization with template fallback |
@@ -66,7 +67,7 @@ Emit PyQt signals for progress/results. Support pause/resume/cancel.
 
 | Module | Purpose |
 |---|---|
-| `indexer.py` | Visual indexing — extracts frames, generates CLIP embeddings and tags |
+| `indexer.py` | Visual indexing — extracts frames, generates CLIP embeddings/tags, runs YOLOv8 object detection |
 | `transcriber.py` | Audio transcription via Whisper |
 | `transcribe_translate_worker.py` | Combined transcription + translation pipeline |
 | `importer.py` | Folder import scanner |
@@ -101,6 +102,7 @@ project_dir/
 | `chromadb` | >=0.4.18 | Vector database for embeddings |
 | `opencv-python` | >=4.8.0 | Video frame extraction |
 | `face_recognition` | >=1.3.0 | Face detection/embedding |
+| `ultralytics` | >=8.0.0 | YOLOv8 object detection |
 | `psutil` | >=5.9.0 | RAM monitoring for dynamic batch sizing |
 | `python-dotenv` | >=1.0.0 | Load `.env` file for API keys and config |
 | `numpy` | <2.0.0 | Numerical operations |
@@ -123,6 +125,7 @@ Configured via a `.env` file in the project root (see `.env.example`):
 | **CLIP** | `openai/clip-vit-large-patch14` | Visual embeddings (768-D) for semantic search and tag matching |
 | **BLIP-large** | `Salesforce/blip-image-captioning-large` (default) | Scene captioning (444M params, ~1GB VRAM) |
 | **BLIP-2** | `Salesforce/blip2-opt-2.7b` (opt-in: `USE_BLIP2=True`) | Higher-quality captions (2.7B params, ~3GB VRAM) |
+| **YOLOv8** | `yolov8m.pt` (medium) | Bounding-box object detection (80 COCO classes, 0.4 conf threshold) |
 | **Whisper** | `large-v3` / `medium` (faster-whisper) | Speech transcription (accuracy vs speed mode) |
 | **Llama-3.2** | `unsloth/Llama-3.2-3B-Instruct` (4-bit quantized) | Summary generation |
 | **Phi-3** | `microsoft/Phi-3-mini-4k-instruct` | LLM fallback if Llama fails to load |

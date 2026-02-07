@@ -209,6 +209,7 @@ class SearchEngine:
             "FILENAME": 1.2,  # Filename matches are very reliable
             "CAST": 1.3,  # Face matches are highly reliable
             "EMOTION": 0.8,
+            "OBJECT (YOLO)": 0.9,
             "OBJECT": 0.85,
             "SHOT_TYPE": 0.75,
             "TAG": 0.7,
@@ -408,7 +409,27 @@ class SearchEngine:
                         })
                         break
             
-            # Object search
+            # YOLO object search (high-confidence bounding-box detections)
+            if "objects_yolo" in data:
+                yolo_objects = data.get("objects_yolo", [])
+                query_lower = query.lower()
+                matched_yolo = set()
+                for det in yolo_objects:
+                    label = det.get("label", "").lower()
+                    if any(term in label for term in query_terms) or query_lower in label or label in query_lower:
+                        if label not in matched_yolo:
+                            matched_yolo.add(label)
+                            confidence = det.get("confidence", 0)
+                            timestamp = det.get("timestamp", 0)
+                            results_by_type["OBJECT (YOLO)"].append({
+                                "path": video_path,
+                                "match_type": "OBJECT (YOLO)",
+                                "context": f"Detected: {label} ({confidence:.0%} conf) @ {int(timestamp)}s",
+                                "score": 90 * confidence,
+                                "timestamp": timestamp
+                            })
+
+            # Object search (CLIP zero-shot fallback for abstract concepts)
             if "objects" in data and any(term in query.lower() for term in ["holding", "near", "phone", "camera", "book", "cup", "bag", "car", "computer", "object"]):
                 objects = data.get("objects", [])
                 query_lower = query.lower()

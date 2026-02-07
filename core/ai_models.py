@@ -59,7 +59,8 @@ class AIBackend:
                     cls._instance.tag_embeddings = None
                     cls._instance.llm_model = None
                     cls._instance.llm_tokenizer = None
-                    
+                    cls._instance.yolo_model = None
+
                     # Thread-safe loading lock
                     cls._instance.load_lock = threading.Lock() 
             
@@ -187,6 +188,23 @@ class AIBackend:
                     print(f"BLIP LOAD FAILED: {e}")
                     raise e
 
+    # --- 2b. YOLOv8 (Object Detection) ---
+    def load_yolo(self):
+        with self.load_lock:
+            if self.yolo_model: return self.yolo_model
+
+            print(f"Loading YOLOv8m [{self.device}]...")
+            try:
+                from ultralytics import YOLO
+                self.yolo_model = YOLO("yolov8m.pt")
+                # Move to the active device (YOLO handles device internally via .to())
+                if self.device != "cpu":
+                    self.yolo_model.to(self.device)
+                return self.yolo_model
+            except Exception as e:
+                print(f"YOLO LOAD FAILED: {e}")
+                raise e
+
     # --- 3. WHISPER (Audio) ---
 
     def get_whisper_params(self, mode="accuracy"):
@@ -306,6 +324,10 @@ class AIBackend:
                 del self.blip_processor
                 self.blip_model = None
                 self.blip_processor = None
+
+            if self.yolo_model:
+                del self.yolo_model
+                self.yolo_model = None
 
             if self.whisper_model:
                 del self.whisper_model
