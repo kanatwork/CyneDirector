@@ -30,12 +30,13 @@ class IndexerWorker(QThread):
         self.mode = mode  # "speed" or "accuracy"
         
         # --- Mode-based Settings ---
-        # Optimize batch size based on available memory
+        # Optimize batch size based on available memory and device
+        device = AIBackend().device
         base_batch_accuracy = 32
         base_batch_speed = 64
-        
+
         if mode == "accuracy":
-            self.batch_size = get_optimal_batch_size(base_batch_accuracy, min_batch=16, max_batch=64)
+            self.batch_size = get_optimal_batch_size(base_batch_accuracy, min_batch=16, max_batch=64, device=device)
             self.min_interval = 0.5  # More frequent sampling (1 frame per 0.5-5 seconds)
             self.max_interval = 5.0
             self.scene_threshold = 0.60
@@ -43,7 +44,7 @@ class IndexerWorker(QThread):
             self.tag_threshold_percent = 0.40  # 40% of max score for accuracy mode
             self.min_frames_for_tag = 3  # Very strict: tag must appear in at least 3 frames
         else:  # speed mode
-            self.batch_size = get_optimal_batch_size(base_batch_speed, min_batch=32, max_batch=128)
+            self.batch_size = get_optimal_batch_size(base_batch_speed, min_batch=32, max_batch=128, device=device)
             self.min_interval = 1.0  # Current sampling (1 frame per 1.5-15 seconds)
             self.max_interval = 15.0
             self.scene_threshold = 0.60
@@ -97,9 +98,11 @@ class IndexerWorker(QThread):
             clip_model, clip_processor = ai.load_clip()
             self.log_signal.emit("CLIP model loaded successfully")
             
-            self.log_signal.emit("Loading BLIP-2 model for caption generation...")
+            from config import USE_BLIP2
+            blip_label = "BLIP-2" if USE_BLIP2 else "BLIP-large"
+            self.log_signal.emit(f"Loading {blip_label} model for caption generation...")
             blip_model, blip_processor = ai.load_blip()
-            self.log_signal.emit("BLIP-2 model loaded successfully")
+            self.log_signal.emit(f"{blip_label} model loaded successfully")
         except Exception as e:
             self.log_signal.emit(f"CRITICAL: AI Load Error - {e}")
             self.finished_signal.emit()
@@ -337,7 +340,7 @@ class IndexerWorker(QThread):
                     except Exception as e:
                         print(f"Temporal sequence error: {e}")
 
-            # --- PHASE 2: GENERATE DESCRIPTIONS (BLIP-2) - Improved Quality ---
+            # --- PHASE 2: GENERATE DESCRIPTIONS (BLIP) - Improved Quality ---
             self.log_signal.emit(f"  → Detected {len(detected_scenes)} scene(s), generating descriptions...")
             descriptions = []
             # Analyze more scenes (up to 5) for better coverage
@@ -409,8 +412,9 @@ class IndexerWorker(QThread):
                     # Pass the resized image to BLIP with prompt
                     inputs = blip_processor(images=scene['best_frame'], text=prompt, return_tensors="pt").to(ai.device)
                     
-                    # BLIP needs inputs in the correct dtype if model is float16
-                    if ai.dtype == torch.float16:
+                    # BLIP pixel values must match model dtype.
+                    # Only use half() on CUDA — MPS/CPU use float32.
+                    if ai.device == "cuda" and ai.dtype == torch.float16:
                         inputs["pixel_values"] = inputs["pixel_values"].half()
 
                     with torch.no_grad():

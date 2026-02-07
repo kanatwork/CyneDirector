@@ -121,7 +121,8 @@ Configured via a `.env` file in the project root (see `.env.example`):
 | Model | ID | Purpose |
 |---|---|---|
 | **CLIP** | `openai/clip-vit-large-patch14` | Visual embeddings (768-D) for semantic search and tag matching |
-| **BLIP-2** | `Salesforce/blip2-opt-2.7b` | Natural language scene descriptions |
+| **BLIP-large** | `Salesforce/blip-image-captioning-large` (default) | Scene captioning (444M params, ~1GB VRAM) |
+| **BLIP-2** | `Salesforce/blip2-opt-2.7b` (opt-in: `USE_BLIP2=True`) | Higher-quality captions (2.7B params, ~3GB VRAM) |
 | **Whisper** | `large-v3` / `medium` (faster-whisper) | Speech transcription (accuracy vs speed mode) |
 | **Llama-3.2** | `unsloth/Llama-3.2-3B-Instruct` (4-bit quantized) | Summary generation |
 | **Phi-3** | `microsoft/Phi-3-mini-4k-instruct` | LLM fallback if Llama fails to load |

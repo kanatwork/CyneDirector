@@ -31,6 +31,11 @@ STYLESHEET = generate_stylesheet()
 DB_FOLDER_NAME = "_cyne_db"
 THUMBNAIL_SIZE = (320, 180)
 
+# AI Model Config
+# Set USE_BLIP2=True to use the larger Salesforce/blip2-opt-2.7b (2.7B params, ~3GB VRAM)
+# instead of the default Salesforce/blip-image-captioning-large (444M params, ~1GB VRAM).
+USE_BLIP2 = False
+
 # Translation Config
 # To use DeepL translation, set DEEPL_API_KEY in a .env file at the project root
 # or as a system environment variable. Get a free key at: https://www.deepl.com/pro-api
