@@ -17,8 +17,9 @@ CyneDirector is an AI-powered video management and semantic search desktop appli
 ## Architecture
 
 ```
-main.py                  Entry point → ProjectDialog → MainWindow
+main.py                  Entry point (DLL load-order fix, crash handler) → ProjectDialog → MainWindow
 config.py                Global config, constants; re-exports COLORS/STYLESHEET from gui/theme.py
+run.bat                  Windows launcher — invokes venv Python directly (avoids system Python conflicts)
 ```
 
 ### core/ — Business Logic Layer
@@ -137,6 +138,18 @@ Models are lazily loaded (only when needed) and managed by the `AIBackend` singl
 - **Face recognition** is available but not actively wired into the indexing workflow
 - **Memory risk** with very large video libraries (mitigated by dynamic batch sizing but no streaming yet)
 - **Single-user only** — no collaboration or cloud sync features
+- **RTX 5070 (sm_120)** — torch 2.10+cu126 only supports up to sm_90; needs PyTorch built with CUDA 12.8+ for full GPU support
+
+## Windows DLL Load-Order Fix (`main.py`)
+
+PyQt6 and torch both bundle C++ runtime DLLs (`vcruntime140.dll`, `msvcp140.dll`). If PyQt6 is imported first, its copies get locked into the process and torch's `c10.dll` fails to initialize (`WinError 1114`). Additionally, a foreign Python on the system PATH (e.g. `C:\Python314`) can inject incompatible DLLs.
+
+`main.py` handles this at the top of the file, before any library imports:
+1. Strips non-venv Python directories from `PATH`
+2. Prepends `torch/lib` to `PATH`
+3. Pre-imports `torch` **before** PyQt6
+
+If torch is not installed, the pre-import is silently skipped. Use `run.bat` to launch the app — it invokes `venv\Scripts\python.exe` directly so the correct Python is always used.
 
 ## Development Conventions
 

@@ -4,9 +4,32 @@ import os
 import ctypes  # Required for Windows Taskbar Icon Fix
 import traceback
 from datetime import datetime
+
+# --- DLL LOAD ORDER FIX (Windows) ---
+# PyQt6 and torch both bundle C++ runtime DLLs.  If PyQt6 is imported first its
+# vcruntime/msvcp copies get locked in the process, and torch's c10.dll then
+# fails to initialise.  Additionally, a foreign Python (e.g. 3.14) on the system
+# PATH can inject incompatible DLLs.
+#
+# Fix: clean PATH of foreign Python dirs, prepend torch's lib dir, and pre-import
+# torch *before* PyQt6 so the CUDA runtime loads the correct libraries.
+if sys.platform == "win32":
+    _venv_prefix = os.path.normcase(sys.prefix)
+    _clean = [p for p in os.environ.get("PATH", "").split(";")
+              if "python" not in p.lower() or os.path.normcase(p).startswith(_venv_prefix)]
+    _torch_lib = os.path.join(sys.prefix, "Lib", "site-packages", "torch", "lib")
+    if os.path.isdir(_torch_lib):
+        _clean.insert(0, _torch_lib)
+    os.environ["PATH"] = ";".join(_clean)
+
+    try:
+        import torch  # noqa: F401  — pre-load before PyQt6 claims the C++ runtime
+    except ImportError:
+        pass  # torch not installed; other features still work
+
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt 
+from PyQt6.QtCore import Qt
 
 # Import Config first
 import config
