@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
         sb_layout.addStretch() 
         
         lbl_ver = QLabel(VERSION)
-        lbl_ver.setStyleSheet("color: #444; font-size: 9px;")
+        lbl_ver.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 9px;")
         lbl_ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sb_layout.addWidget(lbl_ver)
 
@@ -283,70 +283,16 @@ class MainWindow(QMainWindow):
         workflow_layout.setContentsMargins(0, 0, 0, 0)
         workflow_layout.setSpacing(15)
         
-        # Video Checkbox
+        # Video Checkbox (styled by global QSS)
         self.checkbox_video = QCheckBox("Video")
-        self.checkbox_video.setStyleSheet(f"""
-            QCheckBox {{
-                color: {COLORS['text_main']};
-                font-size: 12px;
-                font-weight: 600;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border: 2px solid {COLORS['border']};
-                border-radius: 4px;
-                background: {COLORS['bg_input']};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {COLORS['accent']};
-                border-color: {COLORS['accent']};
-            }}
-        """)
         workflow_layout.addWidget(self.checkbox_video)
-        
-        # Audio Checkbox
+
+        # Audio Checkbox (styled by global QSS)
         self.checkbox_audio = QCheckBox("Audio")
-        self.checkbox_audio.setStyleSheet(f"""
-            QCheckBox {{
-                color: {COLORS['text_main']};
-                font-size: 12px;
-                font-weight: 600;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border: 2px solid {COLORS['border']};
-                border-radius: 4px;
-                background: {COLORS['bg_input']};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {COLORS['accent']};
-                border-color: {COLORS['accent']};
-            }}
-        """)
         workflow_layout.addWidget(self.checkbox_audio)
-        
-        # Translate Checkbox
+
+        # Translate Checkbox (styled by global QSS)
         self.checkbox_translate = QCheckBox("Translate")
-        self.checkbox_translate.setStyleSheet(f"""
-            QCheckBox {{
-                color: {COLORS['text_main']};
-                font-size: 12px;
-                font-weight: 600;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border: 2px solid {COLORS['border']};
-                border-radius: 4px;
-                background: {COLORS['bg_input']};
-            }}
-            QCheckBox::indicator:checked {{
-                background: {COLORS['accent']};
-                border-color: {COLORS['accent']};
-            }}
-        """)
         self.checkbox_translate.setToolTip("Translate transcripts to English (requires existing transcript)")
         workflow_layout.addWidget(self.checkbox_translate)
         
@@ -365,42 +311,7 @@ class MainWindow(QMainWindow):
         mode_group.addButton(self.radio_speed)
         mode_group.addButton(self.radio_accuracy)
         
-        self.radio_speed.setStyleSheet(f"""
-            QRadioButton {{
-                color: {COLORS['text_main']};
-                font-size: 11px;
-                font-weight: 600;
-            }}
-            QRadioButton::indicator {{
-                width: 16px;
-                height: 16px;
-                border: 2px solid {COLORS['border']};
-                border-radius: 9px;
-                background: {COLORS['bg_input']};
-            }}
-            QRadioButton::indicator:checked {{
-                background: {COLORS['accent']};
-                border-color: {COLORS['accent']};
-            }}
-        """)
-        self.radio_accuracy.setStyleSheet(f"""
-            QRadioButton {{
-                color: {COLORS['text_main']};
-                font-size: 11px;
-                font-weight: 600;
-            }}
-            QRadioButton::indicator {{
-                width: 16px;
-                height: 16px;
-                border: 2px solid {COLORS['border']};
-                border-radius: 9px;
-                background: {COLORS['bg_input']};
-            }}
-            QRadioButton::indicator:checked {{
-                background: {COLORS['accent']};
-                border-color: {COLORS['accent']};
-            }}
-        """)
+        # Radio buttons styled by global QSS
         workflow_layout.addWidget(self.radio_speed)
         workflow_layout.addWidget(self.radio_accuracy)
         
@@ -416,52 +327,16 @@ class MainWindow(QMainWindow):
         self.btn_start_indexing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start_indexing.clicked.connect(self.start_indexing_from_checkboxes)
         self.btn_start_indexing.setToolTip("Start processing selected operations")
-        self.btn_start_indexing.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['success']};
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                font-size: 12px;
-                font-weight: 800;
-                border-radius: 6px;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:hover {{
-                background: #45a049;
-            }}
-            QPushButton:disabled {{
-                background: #444;
-                color: #888;
-            }}
-        """)
+        self.btn_start_indexing.setStyleSheet(self._success_btn_style())
         workflow_layout.addWidget(self.btn_start_indexing)
-        
+
         # START WORKFLOW Button (Primary CTA - Visible when queue has items)
         self.btn_start_workflow_top = QPushButton("▶ START WORKFLOW")
         self.btn_start_workflow_top.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start_workflow_top.clicked.connect(self.start_workflow)
         self.btn_start_workflow_top.setToolTip("Start processing queued operations")
         self.btn_start_workflow_top.hide()  # Hidden by default, shown when queue has items
-        self.btn_start_workflow_top.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['success']};
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                font-size: 12px;
-                font-weight: 800;
-                border-radius: 6px;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:hover {{
-                background: #45a049;
-            }}
-            QPushButton:disabled {{
-                background: #444;
-                color: #888;
-            }}
-        """)
+        self.btn_start_workflow_top.setStyleSheet(self._success_btn_style())
         workflow_layout.addWidget(self.btn_start_workflow_top)
         
         # Workflow Status Badge (shows queue count)
@@ -469,7 +344,7 @@ class MainWindow(QMainWindow):
         self.workflow_badge.setStyleSheet(f"""
             QLabel {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
                 padding: 4px 10px;
                 border-radius: 12px;
                 font-size: 10px;
@@ -517,7 +392,7 @@ class MainWindow(QMainWindow):
             }}
             QPushButton:checked {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
                 border: none;
             }}
         """)
@@ -527,20 +402,7 @@ class MainWindow(QMainWindow):
         self.btn_cancel = QPushButton("✕ CANCEL")
         self.btn_cancel.clicked.connect(self.cancel_workflow_handler)
         self.btn_cancel.hide()
-        self.btn_cancel.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['error']};
-                color: white;
-                border: none;
-                font-weight: bold;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 11px;
-            }}
-            QPushButton:hover {{
-                background: #d32f2f;
-            }}
-        """)
+        self.btn_cancel.setStyleSheet(self._error_btn_style())
         right_layout.addWidget(self.btn_cancel)
         
         right_layout.addStretch()
@@ -646,7 +508,7 @@ class MainWindow(QMainWindow):
                 border-color: {COLORS['accent']};
                 color: {COLORS['accent']}; 
             }}
-            QPushButton:disabled {{ color: #444; border-color: #333; }}
+            QPushButton:disabled {{ color: {COLORS['text_disabled']}; border-color: {COLORS['border']}; }}
         """)
         return btn
     
@@ -672,13 +534,55 @@ class MainWindow(QMainWindow):
                 color: {COLORS['accent']};
             }}
             QPushButton:disabled {{
-                color: #444;
-                border-color: #333;
+                color: {COLORS['text_disabled']};
+                border-color: {COLORS['border']};
                 background: transparent;
             }}
         """)
         return btn
-    
+
+    @staticmethod
+    def _success_btn_style():
+        """Shared stylesheet for success/start buttons."""
+        return f"""
+            QPushButton {{
+                background: {COLORS['success']};
+                color: white;
+                border: none;
+                padding: 8px 20px;
+                font-size: 12px;
+                font-weight: 800;
+                border-radius: 6px;
+                letter-spacing: 0.5px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['success_hover']};
+            }}
+            QPushButton:disabled {{
+                background: {COLORS['text_disabled']};
+                color: {COLORS['text_dim']};
+            }}
+        """
+
+    @staticmethod
+    def _error_btn_style():
+        """Shared stylesheet for error/cancel/stop buttons."""
+        return f"""
+            QPushButton {{
+                background: {COLORS['error']};
+                color: white;
+                border: none;
+                font-weight: bold;
+                padding: 8px 20px;
+                border-radius: 6px;
+                font-size: 12px;
+                letter-spacing: 0.5px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['error_hover']};
+            }}
+        """
+
     def create_workflow_panel(self):
         """Create the workflow queue panel."""
         panel = QWidget()
@@ -725,24 +629,7 @@ class MainWindow(QMainWindow):
         self.btn_start_workflow = QPushButton("▶ Start Workflow")
         self.btn_start_workflow.clicked.connect(self.start_workflow)
         self.btn_start_workflow.setToolTip("Begin processing all queued operations")
-        self.btn_start_workflow.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['success']};
-                color: white;
-                border: none;
-                padding: 6px 16px;
-                font-size: 11px;
-                font-weight: bold;
-                border-radius: 5px;
-            }}
-            QPushButton:hover {{
-                background: #45a049;
-            }}
-            QPushButton:disabled {{
-                background: #444;
-                color: #888;
-            }}
-        """)
+        self.btn_start_workflow.setStyleSheet(self._success_btn_style())
         header_layout.addWidget(self.btn_start_workflow)
         
         self.btn_pause_workflow = QPushButton("⏸ Pause")
@@ -760,7 +647,7 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
             }}
             QPushButton:hover {{
-                background: #F57C00;
+                background: {COLORS['warning_hover']};
             }}
         """)
         header_layout.addWidget(self.btn_pause_workflow)
@@ -907,7 +794,7 @@ class MainWindow(QMainWindow):
             }}
             QMenu::item:selected {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
             }}
         """)
         
@@ -1321,22 +1208,8 @@ class MainWindow(QMainWindow):
         
         # Restore START INDEXING button
         self.btn_start_indexing.setText("▶ START INDEXING")
-        self.btn_start_indexing.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['success']};
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                font-size: 12px;
-                font-weight: 800;
-                border-radius: 6px;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:hover {{
-                background: #45a049;
-            }}
-        """)
-        
+        self.btn_start_indexing.setStyleSheet(self._success_btn_style())
+
         self.update_workflow_queue_display()
         self._update_start_button_visibility()
         self.activity_log.log_warning("Workflow cancelled")
@@ -1353,21 +1226,7 @@ class MainWindow(QMainWindow):
         
         # Change START INDEXING button to STOP
         self.btn_start_indexing.setText("⏹ STOP")
-        self.btn_start_indexing.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['error']};
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                font-size: 12px;
-                font-weight: 800;
-                border-radius: 6px;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:hover {{
-                background: #d32f2f;
-            }}
-        """)
+        self.btn_start_indexing.setStyleSheet(self._error_btn_style())
         
         self._update_start_button_visibility()
     
@@ -1380,21 +1239,7 @@ class MainWindow(QMainWindow):
         
         # Restore START INDEXING button
         self.btn_start_indexing.setText("▶ START INDEXING")
-        self.btn_start_indexing.setStyleSheet(f"""
-            QPushButton {{
-                background: {COLORS['success']};
-                color: white;
-                border: none;
-                padding: 8px 20px;
-                font-size: 12px;
-                font-weight: 800;
-                border-radius: 6px;
-                letter-spacing: 0.5px;
-            }}
-            QPushButton:hover {{
-                background: #45a049;
-            }}
-        """)
+        self.btn_start_indexing.setStyleSheet(self._success_btn_style())
         
         self.update_workflow_queue_display()
         self._update_start_button_visibility()
@@ -1517,7 +1362,7 @@ class MainWindow(QMainWindow):
         # Keep preview_lbl for fallback
         self.preview_lbl = QLabel()
         self.preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview_lbl.setStyleSheet("background: #000;")
+        self.preview_lbl.setStyleSheet(f"background: {COLORS['bg_app']};")
         self.preview_lbl.setMinimumHeight(250)
         self.preview_lbl.hide()  # Hidden by default, use embedded player
         
@@ -1532,7 +1377,7 @@ class MainWindow(QMainWindow):
 
     def create_menu_bar(self):
         menubar = self.menuBar()
-        menubar.setStyleSheet(f"QMenuBar {{ background: {COLORS['bg_panel']}; color: #DDD; }} QMenuBar::item:selected {{ background: #333; }}")
+        menubar.setStyleSheet(f"QMenuBar {{ background: {COLORS['bg_panel']}; color: {COLORS['text_main']}; }} QMenuBar::item:selected {{ background: {COLORS['surface_hover']}; }}")
         
         file_menu = menubar.addMenu("File")
         

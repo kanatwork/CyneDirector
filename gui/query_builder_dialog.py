@@ -13,7 +13,7 @@ class QueryBuilderDialog(QDialog):
         self.setMinimumSize(700, 600)
         self.setStyleSheet(f"""
             QDialog {{
-                background: {COLORS['bg_main']};
+                background: {COLORS['bg_app']};
                 color: {COLORS['text_main']};
             }}
         """)

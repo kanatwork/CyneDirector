@@ -18,7 +18,7 @@ CyneDirector is an AI-powered video management and semantic search desktop appli
 
 ```
 main.py                  Entry point → ProjectDialog → MainWindow
-config.py                Global config, theme palette, constants
+config.py                Global config, constants; re-exports COLORS/STYLESHEET from gui/theme.py
 ```
 
 ### core/ — Business Logic Layer
@@ -26,8 +26,8 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 
 | Module | Purpose |
 |---|---|
-| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, Whisper, LLM models |
-| `database.py` | SQLite (metadata) + ChromaDB (vector embeddings) |
+| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, Whisper, LLM models. Auto-detects GPU compute capability at import time |
+| `database.py` | SQLite (metadata, WAL mode) + ChromaDB (vector embeddings). Connection-per-thread via `threading.local()` |
 | `search_engine.py` | Multi-modal semantic search with query expansion, decomposition, pagination, caching |
 | `tags.py` | Tag hierarchy and vocabulary for visual indexing |
 | `translator.py` | Language detection and translation (DeepL / Whisper) |
@@ -42,10 +42,11 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 | `background_indexer.py` | Incremental background file indexing |
 
 ### gui/ — Presentation Layer (PyQt6)
-Dark theme UI with Wisteria accent (`#BEAEDB`). All heavy work delegated to workers.
+Dark theme UI with Indigo accent (`#6366f1`). All heavy work delegated to workers.
 
 | Module | Purpose |
 |---|---|
+| `theme.py` | Centralized design system — color palette, fonts, spacing, `generate_stylesheet()` |
 | `main_window.py` | Main application window, layout, menu |
 | `search_tab.py` | Search interface with pagination controls |
 | `media_tree.py` | Project file tree browser |
@@ -100,10 +101,19 @@ project_dir/
 | `opencv-python` | >=4.8.0 | Video frame extraction |
 | `face_recognition` | >=1.3.0 | Face detection/embedding |
 | `psutil` | >=5.9.0 | RAM monitoring for dynamic batch sizing |
+| `python-dotenv` | >=1.0.0 | Load `.env` file for API keys and config |
 | `numpy` | <2.0.0 | Numerical operations |
 | `deepl` | >=1.0.0 | Translation API (optional) |
 
 **External:** FFprobe (for robust video metadata extraction)
+
+### Environment Variables
+
+Configured via a `.env` file in the project root (see `.env.example`):
+
+| Variable | Purpose |
+|---|---|
+| `DEEPL_API_KEY` | DeepL API key for high-quality translation (optional, falls back to Whisper) |
 
 ## AI Models Used
 
@@ -120,7 +130,6 @@ Models are lazily loaded (only when needed) and managed by the `AIBackend` singl
 ## Known Issues
 
 - **No automated test suite** — no pytest, no unit or integration tests
-- **DeepL API key is hardcoded** in `config.py` line 198 — should use env var only
 - **Some debug logging** may still be scattered in the codebase
 - **Limited export formats** — only SRT currently supported
 - **No undo/redo** functionality in the UI
@@ -144,6 +153,7 @@ Models are lazily loaded (only when needed) and managed by the `AIBackend` singl
 
 ### Patterns
 - **Singleton** for expensive resources: `AIBackend`, `Database`, `ProjectManager`, `FaceDB`
+- **Connection-per-thread** for SQLite — each thread gets its own connection via `threading.local()`, WAL mode + `busy_timeout=5000` for concurrent access. `_lock` wraps entire read-modify-write sequences to prevent lost updates.
 - **Signal/Slot** for thread-to-UI communication (PyQt6 signals)
 - **Workflow Manager** for task queuing with priority levels (high/normal/low)
 - **Graceful degradation** — LLM fails → template-based summary; model unavailable → skip
@@ -154,9 +164,17 @@ Models are lazily loaded (only when needed) and managed by the `AIBackend` singl
 - Fallback paths when AI models fail (template summaries, skip operations)
 
 ### UI Theme
-- Cinema Dark with Wisteria accent (`#BEAEDB`)
-- All styling defined in `config.py` COLORS dict and STYLESHEET string
-- Font: Segoe UI / Roboto, 13px base
+- Cinema Dark with Indigo accent (`#6366f1`), background `#0f0f0f`, surface `#1a1a1a`
+- All design tokens centralized in `gui/theme.py` (`COLORS` dict, `generate_stylesheet()`)
+- `config.py` re-exports `COLORS` and `STYLESHEET` for backward compatibility
+- Font: Inter / Segoe UI, 13px base
+- GUI files reference `COLORS['key']` — no hardcoded hex colors in `main_window.py`
+
+### GPU Support
+- `TORCH_CUDA_ARCH_LIST` is set dynamically at import time based on `torch.cuda.get_device_capability()`
+- Supported architectures: Turing 7.5 (RTX 20), Ampere 8.0/8.6 (RTX 30), Ada 8.9 (RTX 40), Hopper/Blackwell 9.0+ (RTX 50)
+- Unknown/newer GPUs fall back to the highest known arch (`9.0`)
+- TF32 and `cudnn.benchmark` enabled for Ampere+ speedups
 
 ### Performance Conventions
 - Dynamic batch sizing based on available RAM (`core/performance.py`)
