@@ -37,7 +37,7 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 | `project_manager.py` | Recent projects, `.cyne` project file management |
 | `workflow_manager.py` | Task queue with priority scheduling, pause/resume |
 | `media_engine.py` | FFprobe wrapper for video metadata extraction |
-| `face_db.py` | Face recognition database (encodings + names) |
+| `face_db.py` | Face recognition database — SQLite-backed (encodings, names, appearances). Auto-migrates legacy pickle/json on first run |
 | `performance.py` | Dynamic batch sizing based on available RAM, memory monitoring |
 | `logger.py` | Centralized logging (console + file handlers) |
 | `srt_exporter.py` | SRT subtitle file export |
