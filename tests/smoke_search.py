@@ -2,16 +2,92 @@
 Smoke-check for SearchEngine query parsing, temporal return shapes,
 boolean operators, and field-specific filters.
 
-Run:  python -m tests.smoke_search   (from the project root)
+Run:  python3 -m tests.smoke_search   (from the project root)
 """
-import sys, os, types, unittest
-from collections import defaultdict
-from unittest.mock import patch, MagicMock
+import os
+import sys
+import types
+import unittest
 
 # Add project root to path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+# Optional runtime stubs so this smoke-check can run without heavy ML deps.
+def _install_import_stubs():
+    try:
+        import torch  # noqa: F401
+    except Exception:
+        torch_stub = types.ModuleType("torch")
+
+        class _NoGrad:
+            def __enter__(self):
+                return None
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        torch_stub.no_grad = lambda: _NoGrad()
+        sys.modules["torch"] = torch_stub
+
+    try:
+        import numpy  # noqa: F401
+    except Exception:
+        np_stub = types.ModuleType("numpy")
+
+        class _LinAlg:
+            @staticmethod
+            def norm(_value):
+                return 1.0
+
+        np_stub.mean = lambda values, axis=0: values[0] if values else 0
+        np_stub.linalg = _LinAlg()
+        sys.modules["numpy"] = np_stub
+
+    if "core.database" not in sys.modules:
+        db_stub = types.ModuleType("core.database")
+
+        class _Database:
+            def __init__(self, *args, **kwargs):
+                self.project_path = kwargs.get("project_path")
+
+            def initialize(self, *args, **kwargs):
+                pass
+
+        db_stub.Database = _Database
+        sys.modules["core.database"] = db_stub
+
+    if "core.ai_models" not in sys.modules:
+        ai_stub = types.ModuleType("core.ai_models")
+
+        class _AIBackend:
+            def __init__(self):
+                self.clip_model = None
+                self.clip_processor = None
+                self.device = "cpu"
+
+            def load_clip(self):
+                pass
+
+        ai_stub.AIBackend = _AIBackend
+        sys.modules["core.ai_models"] = ai_stub
+
+    if "core.face_db" not in sys.modules:
+        face_stub = types.ModuleType("core.face_db")
+
+        class _FaceDB:
+            def __init__(self, *args, **kwargs):
+                self.id_to_name = {}
+
+            def get_name(self, _pid):
+                return "Unknown"
+
+        face_stub.FaceDB = _FaceDB
+        sys.modules["core.face_db"] = face_stub
+
+
+_install_import_stubs()
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +181,21 @@ class TestParseQueryOperators(unittest.TestCase):
         self.assertIn("visual", p["fields"])
         self.assertIn("dialogue", p["fields"])
 
+    def test_quoted_field_value(self):
+        p = self.engine._parse_query_operators('dialogue:"hello world"')
+        self.assertEqual(p["fields"].get("dialogue"), "hello world")
+        self.assertNotIn("dialogue:", p["terms"])
+
+    def test_score_with_quoted_field(self):
+        p = self.engine._parse_query_operators('score:>80 dialogue:"hello world"')
+        self.assertEqual(p["score_range"], (80.0, 100.0))
+        self.assertEqual(p["fields"].get("dialogue"), "hello world")
+
+    def test_duration_with_quoted_field(self):
+        p = self.engine._parse_query_operators('duration:30-60 visual:"golden hour"')
+        self.assertEqual(p["duration_range"], (30.0, 60.0))
+        self.assertEqual(p["fields"].get("visual"), "golden hour")
+
 
 class TestTemporalReturnShape(unittest.TestCase):
     def setUp(self):
@@ -123,6 +214,25 @@ class TestTemporalReturnShape(unittest.TestCase):
         # This is how the caller uses the return value
         for match_type, results_list in result.items():
             self.assertIsInstance(results_list, list)
+
+    def test_temporal_results_integrate_with_search_shape(self):
+        self.engine._get_query_embedding = lambda _q: [0.0] * 4
+        self.engine._collect_results_by_type = lambda *args, **kwargs: {}
+        self.engine._search_temporal_sequence = lambda *args, **kwargs: {
+            "TEMPORAL SEQUENCE": [{
+                "path": "a.mp4",
+                "match_type": "TEMPORAL SEQUENCE",
+                "context": "Sequence: walk then run",
+                "score": 90,
+                "timestamp": 10
+            }]
+        }
+
+        result = self.engine.search("walk then run", use_expansion=False, use_cache=False)
+        self.assertIsInstance(result, dict)
+        self.assertIn("results", result)
+        self.assertGreaterEqual(result["total"], 1)
+        self.assertEqual(result["results"][0]["match_type"], "TEMPORAL SEQUENCE")
 
 
 class TestApplyQueryFilters(unittest.TestCase):

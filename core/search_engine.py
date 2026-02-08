@@ -532,15 +532,11 @@ class SearchEngine:
             'duration_range': None
         }
 
-        # Extract phrases (quoted strings)
-        phrase_pattern = r'"([^"]+)"'
-        phrases = re.findall(phrase_pattern, query)
-        parsed['phrases'] = phrases
-        query_no_phrases = re.sub(phrase_pattern, '', query)
+        query_remaining = query
 
-        # Extract score range BEFORE generic fields (score:>80, score:50-90)
-        score_pattern = r'score:([><=]?)(\d+)(?:-(\d+))?'
-        score_match = re.search(score_pattern, query_no_phrases)
+        # Extract score range before generic fields (score:>80, score:50-90).
+        score_pattern = r'\bscore:([><=]?)(\d+)(?:-(\d+))?\b'
+        score_match = re.search(score_pattern, query_remaining, flags=re.IGNORECASE)
         if score_match:
             op, val1, val2 = score_match.groups()
             if val2:
@@ -551,31 +547,37 @@ class SearchEngine:
                 parsed['score_range'] = (0.0, float(val1))
             else:
                 parsed['score_range'] = (float(val1), float(val1))
-            query_no_phrases = re.sub(score_pattern, '', query_no_phrases)
+            query_remaining = re.sub(
+                score_pattern, '', query_remaining, count=1, flags=re.IGNORECASE
+            )
 
-        # Extract duration range BEFORE generic fields (duration:30-60)
-        duration_pattern = r'duration:(\d+)(?:-(\d+))?'
-        duration_match = re.search(duration_pattern, query_no_phrases)
+        # Extract duration range before generic fields (duration:30-60).
+        duration_pattern = r'\bduration:(\d+)(?:-(\d+))?\b'
+        duration_match = re.search(duration_pattern, query_remaining, flags=re.IGNORECASE)
         if duration_match:
             val1, val2 = duration_match.groups()
             if val2:
                 parsed['duration_range'] = (float(val1), float(val2))
             else:
                 parsed['duration_range'] = (0.0, float(val1))
-            query_no_phrases = re.sub(duration_pattern, '', query_no_phrases)
-
-        # Extract field-specific searches (unquoted values stop at whitespace)
-        field_pattern = r'(\w+):(["\']?)([^"\'\s]+)\2'
-        field_matches = re.findall(field_pattern, query_no_phrases)
-        for field, quote, value in field_matches:
-            parsed['fields'][field.lower()] = value.strip()
-            query_no_phrases = re.sub(
-                f'{re.escape(field)}:{re.escape(quote)}{re.escape(value)}{re.escape(quote)}',
-                '', query_no_phrases, count=1
+            query_remaining = re.sub(
+                duration_pattern, '', query_remaining, count=1, flags=re.IGNORECASE
             )
-        
+
+        # Extract field-specific searches (supports quoted values with spaces).
+        field_pattern = r'(\w+):(?:"([^"]+)"|\'([^\']+)\'|([^\s]+))'
+        for field, double_quoted, single_quoted, unquoted in re.findall(field_pattern, query_remaining):
+            value = (double_quoted or single_quoted or unquoted).strip()
+            parsed['fields'][field.lower()] = value
+        query_remaining = re.sub(field_pattern, '', query_remaining)
+
+        # Extract standalone phrases that are not consumed by field:value parsing.
+        phrase_pattern = r'"([^"]+)"'
+        parsed['phrases'] = re.findall(phrase_pattern, query_remaining)
+        query_remaining = re.sub(phrase_pattern, '', query_remaining)
+
         # Extract boolean operators and terms
-        query_clean = query_no_phrases.strip()
+        query_clean = query_remaining.strip()
         # Simple tokenization - split by AND, OR, NOT (case insensitive)
         tokens = re.split(r'\s+(AND|OR|NOT)\s+', query_clean, flags=re.IGNORECASE)
         
