@@ -64,7 +64,11 @@ class MainWindow(QMainWindow):
         self.db = Database()
         self.db.initialize(self.project_path)
         logger.debug("Database initialized")
-        
+
+        # Load per-project settings
+        import config as _cfg
+        _cfg.load_project_settings(self.project_path)
+
         # Initialize Workflow Manager
         logger.debug("Initializing WorkflowManager")
         self.workflow_manager = WorkflowManager(self.project_path)
@@ -1826,6 +1830,14 @@ class MainWindow(QMainWindow):
         act_export_srt.triggered.connect(self.export_srt_handler)
         file_menu.addAction(act_export_srt)
         
+        # Edit menu
+        edit_menu = menubar.addMenu("Edit")
+
+        act_settings = QAction("Settings...", self)
+        act_settings.setShortcut("Ctrl+,")
+        act_settings.triggered.connect(self.show_settings)
+        edit_menu.addAction(act_settings)
+
         # Help menu
         help_menu = menubar.addMenu("Help")
         
@@ -1894,7 +1906,27 @@ class MainWindow(QMainWindow):
         from gui.shortcuts_panel import ShortcutsPanel
         panel = ShortcutsPanel(self)
         panel.exec()
-    
+
+    def show_settings(self):
+        """Open the settings dialog."""
+        import config as _cfg
+        from gui.settings_dialog import SettingsDialog
+        dlg = SettingsDialog(_cfg._settings, self.project_path, parent=self)
+        if dlg.exec():
+            self._apply_settings_changes()
+
+    def _apply_settings_changes(self):
+        """Sync runtime config after settings are saved."""
+        import config as _cfg
+        # Update USE_BLIP2 at runtime
+        _cfg.USE_BLIP2 = (_cfg.get_setting("blip_variant") == "blip-2")
+        _cfg.GENERATE_PROXIES = _cfg.get_setting("generate_proxies", False)
+        # Update DeepL key
+        deepl_key = _cfg.get_setting("deepl_api_key", "")
+        _cfg.DEEPL_API_KEY = deepl_key
+        _cfg.TRANSLATION_METHOD = "deepl" if deepl_key else "whisper"
+        logger.debug("Settings applied to runtime config")
+
     def open_project_handler(self):
         """Handle Open Project menu action."""
         QMessageBox.information(self, "Open Project", 

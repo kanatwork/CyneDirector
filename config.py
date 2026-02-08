@@ -50,3 +50,21 @@ DEEPL_API_KEY = os.environ.get("DEEPL_API_KEY", "")
 # Translation method preference: "deepl" or "whisper"
 # Automatically selects DeepL when a key is available, otherwise falls back to Whisper.
 TRANSLATION_METHOD = "deepl" if DEEPL_API_KEY else "whisper"
+
+# --- Per-Project Settings ---
+from core.settings_manager import SettingsManager
+_settings = SettingsManager()
+
+def load_project_settings(project_path):
+    """Load per-project settings from _cyne_db/settings.json."""
+    global _settings
+    _settings = SettingsManager(project_path)
+    return _settings
+
+def get_setting(key, default=None):
+    """Get a per-project setting value."""
+    return _settings.get(key, default)
+
+def save_settings():
+    """Persist current per-project settings to disk."""
+    _settings.save()

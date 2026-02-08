@@ -19,7 +19,7 @@ CyneDirector is an AI-powered video management and semantic search desktop appli
 
 ```
 main.py                  Entry point (DLL load-order fix, crash handler) → ProjectDialog → MainWindow
-config.py                Global config, constants; re-exports COLORS/STYLESHEET from gui/theme.py
+config.py                Global config, constants; re-exports COLORS/STYLESHEET from gui/theme.py; per-project settings helpers (get_setting/load_project_settings/save_settings)
 run.bat                  Windows launcher — invokes venv Python directly (avoids system Python conflicts)
 ```
 
@@ -44,6 +44,7 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 | `background_indexer.py` | Incremental background file indexing |
 | `model_manager.py` | Model registry, HF/YOLO cache detection, `ModelDownloadWorker(QThread)` for pre-downloading AI models |
 | `proxy_generator.py` | FFmpeg-based 720p proxy video generation, 320x180 thumbnail extraction, `check_ffmpeg_available()` helper |
+| `settings_manager.py` | Per-project settings persistence — JSON load/save in `_cyne_db/settings.json`, defaults merging, `SettingsManager` class |
 
 ### gui/ — Presentation Layer (PyQt6)
 Dark theme UI with Indigo accent (`#6366f1`). All heavy work delegated to workers.
@@ -64,6 +65,7 @@ Dark theme UI with Indigo accent (`#6366f1`). All heavy work delegated to worker
 | `toast_notification.py` | Toast notification popups |
 | `shortcuts_panel.py` | Keyboard shortcuts reference |
 | `model_download_dialog.py` | Pre-download dialog for AI models — shows cache status, progress bars, skip/download |
+| `settings_dialog.py` | Settings panel — 750×550 modal with 5 category tabs (General, AI/Models, Indexing, Appearance, API Keys), AnimatedToggle, color picker |
 
 ### workers/ — Background Processing (QThread)
 Emit PyQt signals for progress/results. Support pause/resume/cancel.
@@ -92,7 +94,8 @@ project_dir/
     ├── metadata.db            # SQLite
     ├── chroma_data/           # ChromaDB vector store
     ├── faces/                 # Face encodings + names
-    └── indexed_files.json     # Processing tracker
+    ├── indexed_files.json     # Processing tracker
+    └── settings.json          # User settings (persisted by SettingsManager)
 ```
 
 ## Key Dependencies

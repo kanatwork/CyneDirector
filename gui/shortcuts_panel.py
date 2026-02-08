@@ -115,6 +115,7 @@ class ShortcutsPanel(QDialog):
             {"category": "General", "action": "New Project", "key": "Ctrl+N"},
             {"category": "General", "action": "Open Project", "key": "Ctrl+O"},
             {"category": "General", "action": "Export SRT", "key": "Ctrl+E"},
+            {"category": "General", "action": "Open Settings", "key": "Ctrl+,"},
             {"category": "General", "action": "Show Keyboard Shortcuts", "key": "Ctrl+?"},
             {"category": "General", "action": "Help", "key": "F1"},
             
