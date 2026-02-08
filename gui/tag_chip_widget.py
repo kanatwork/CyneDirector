@@ -1,9 +1,11 @@
 # [FILE: gui/tag_chip_widget.py]
-from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QPushButton, QLabel, 
+from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QPushButton, QLabel,
                              QLineEdit, QCompleter, QVBoxLayout, QScrollArea)
 from PyQt6.QtCore import Qt, pyqtSignal, QStringListModel
 from PyQt6.QtGui import QColor
 from config import COLORS
+from gui.animations import drift_in
+from gui.theme import ANIM_NORMAL
 from core.tags import get_tag_bank
 
 class TagChip(QPushButton):
@@ -34,7 +36,7 @@ class TagChip(QPushButton):
         self.setStyleSheet(f"""
             QPushButton {{
                 background: {bg_color};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
                 border: none;
                 border-radius: 12px;
                 padding: 4px 10px;
@@ -90,10 +92,11 @@ class TagChip(QPushButton):
 class TagInputWidget(QWidget):
     """Widget for managing tags with chips and autocomplete."""
     tags_changed = pyqtSignal(list)  # Emits list of tags when changed
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.tags = []
+        self._chip_anims = []  # prevent GC on drift-in animations
         self.setup_ui()
     
     def setup_ui(self):
@@ -151,17 +154,20 @@ class TagInputWidget(QWidget):
         layout.addWidget(self.tag_input)
     
     def add_tag(self, tag_text):
-        """Add a tag chip."""
+        """Add a tag chip with drift-in animation."""
         tag_text = tag_text.strip()
         if not tag_text or tag_text in self.tags:
             return
-        
+
         self.tags.append(tag_text)
         chip = TagChip(tag_text)
         chip.remove_requested.connect(self.remove_tag)
-        
+
         # Insert before stretch
         self.chips_layout.insertWidget(self.chips_layout.count() - 1, chip)
+        # Drift-in animation
+        anim = drift_in(chip, duration=ANIM_NORMAL, distance=8)
+        self._chip_anims.append(anim)
         self.tags_changed.emit(self.tags.copy())
     
     def add_tag_from_input(self):
@@ -192,8 +198,9 @@ class TagInputWidget(QWidget):
             item = self.chips_layout.itemAt(i)
             if item and item.widget():
                 item.widget().deleteLater()
-        
+
         self.tags = []
+        self._chip_anims.clear()
         for tag in tags:
             self.add_tag(tag)
     

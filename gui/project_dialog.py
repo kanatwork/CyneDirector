@@ -74,7 +74,7 @@ class ProjectDialog(QDialog):
             /* Primary button - use objectName instead of class */
             QPushButton[primary="true"] {{
                 background-color: {COLORS['accent']}; 
-                color: #121212; 
+                color: {COLORS['text_on_accent']};
                 font-weight: 800; 
                 font-size: 13px;
                 border-radius: 6px; 
@@ -246,7 +246,7 @@ class ProjectDialog(QDialog):
         self.btn_create.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['accent']}; 
-                color: #121212; 
+                color: {COLORS['text_on_accent']};
                 font-weight: 800; 
                 font-size: 13px;
                 border-radius: 6px; 
@@ -537,7 +537,7 @@ class ProjectDialog(QDialog):
             }}
             QMenu::item:selected {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
             }}
         """)
         

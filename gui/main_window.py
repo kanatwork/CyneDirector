@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QProgressDialog, QStackedWidget, QButtonGroup,
                              QMenu, QListWidget, QListWidgetItem, QCheckBox,
                              QRadioButton, QAbstractItemView, QComboBox,
-                             QScrollArea, QSizePolicy)
+                             QScrollArea, QSizePolicy,
+                             QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer
 from PyQt6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QShortcut, QKeySequence
 
@@ -19,7 +20,7 @@ from gui.search_tab import SearchTab, FlowLayout
 from gui.metadata_panel import MetadataPanel
 from gui.activity_log import ActivityLog, LogLevel
 from gui.toast_notification import ToastManager
-from gui.animations import slide_width, slide_height
+from gui.animations import slide_width, slide_height, fade_in, fade_out, pulse_glow, scale_bounce
 from gui.widgets.search_bar import SearchBar
 from gui.widgets.thumbnail_card import ThumbnailCard
 from gui.widgets.animated_toggle import AnimatedToggle
@@ -605,16 +606,27 @@ class MainWindow(QMainWindow):
 
     # ── Grid / List view toggle ──────────────────────────────────
     def _set_media_view(self, mode):
-        """Switch between 'list' and 'grid' view on the media page."""
+        """Switch between 'list' and 'grid' view on the media page with crossfade."""
         if mode == self.media_view_mode:
             return
+        old_index = self._left_stack.currentIndex()
         self.media_view_mode = mode
         if mode == "grid":
             if not self._grid_populated:
                 self._populate_grid()
-            self._left_stack.setCurrentIndex(1)
+            new_index = 1
         else:
-            self._left_stack.setCurrentIndex(0)
+            new_index = 0
+
+        # Crossfade: fade out old widget, switch, fade in new widget
+        old_widget = self._left_stack.widget(old_index)
+        new_widget = self._left_stack.widget(new_index)
+
+        def _do_switch():
+            self._left_stack.setCurrentIndex(new_index)
+            self._view_anim = fade_in(new_widget, duration=ANIM_FAST)
+
+        self._view_anim = fade_out(old_widget, duration=ANIM_FAST, callback=_do_switch)
         self._update_view_toggle_style()
 
     def _update_view_toggle_style(self):
@@ -660,6 +672,17 @@ class MainWindow(QMainWindow):
         files = self.tree.get_all_file_paths()
         thumb_dir = os.path.join(self.project_path, "_cyne_db", "thumbnails")
 
+        if not files:
+            # Show empty state instead of grid
+            if self.media_view_mode == "grid":
+                self._left_stack.setCurrentIndex(2)
+            self._grid_populated = True
+            return
+
+        # Ensure grid scroll is visible (not empty state)
+        if self.media_view_mode == "grid":
+            self._left_stack.setCurrentIndex(1)
+
         for fpath in files:
             # Try to find thumbnail
             basename = os.path.splitext(os.path.basename(fpath))[0]
@@ -667,7 +690,8 @@ class MainWindow(QMainWindow):
             if not os.path.isfile(thumb_path):
                 thumb_path = None
 
-            # Build status badges
+            # Get duration from metadata
+            duration = None
             status_icons = []
             try:
                 data = self.db.get_video_metadata(fpath)
@@ -675,11 +699,13 @@ class MainWindow(QMainWindow):
                     status_icons.append(("\U0001f4f7", COLORS['success']))  # indexed
                 if data.get("transcript"):
                     status_icons.append(("\U0001f3a4", COLORS['success']))  # transcribed
+                duration = data.get("duration")
             except Exception:
                 pass
 
             card = ThumbnailCard(fpath, thumbnail_path=thumb_path,
-                                  status_icons=status_icons if status_icons else None)
+                                  status_icons=status_icons if status_icons else None,
+                                  duration=duration)
             card.clicked.connect(self._on_grid_card_clicked)
             card.double_clicked.connect(self.open_player_from_tree)
             self.grid_layout.addWidget(card)
@@ -701,20 +727,25 @@ class MainWindow(QMainWindow):
 
     # ── Detail panel slide-in / collapse ─────────────────────────
     def _collapse_detail_panel(self):
-        """Slide the detail/preview panel to 0 width."""
+        """Fade out then collapse the detail/preview panel."""
         sizes = self.media_splitter.sizes()
         if len(sizes) >= 2 and sizes[1] > 0:
             self._saved_splitter_sizes = list(sizes)
-            # Animate by moving splitter — set preview panel to minimum
-            self.media_splitter.setSizes([sizes[0] + sizes[1], 0])
+
+            def _do_collapse():
+                self.media_splitter.setSizes([sizes[0] + sizes[1], 0])
+
+            self._detail_anim = fade_out(self.preview_panel, duration=ANIM_FAST,
+                                          callback=_do_collapse)
 
     def _expand_detail_panel(self):
-        """Restore the detail/preview panel to its previous width."""
+        """Restore and fade in the detail/preview panel."""
         if hasattr(self, '_saved_splitter_sizes'):
             self.media_splitter.setSizes(self._saved_splitter_sizes)
         else:
             total = sum(self.media_splitter.sizes())
             self.media_splitter.setSizes([int(total * 0.65), int(total * 0.35)])
+        self._detail_anim = fade_in(self.preview_panel, duration=ANIM_NORMAL)
 
     # ── GPU / RAM status indicators ──────────────────────────────
     def _init_gpu_indicator(self):
@@ -1475,12 +1506,20 @@ class MainWindow(QMainWindow):
         self.btn_pause_workflow.setText("⏸ Pause")
         self.btn_pause_workflow.clicked.disconnect()
         self.btn_pause_workflow.clicked.connect(self.pause_workflow)
-        
+
         # Change START INDEXING button to STOP
         self.btn_start_indexing.setText("⏹ STOP")
         self.btn_start_indexing.setStyleSheet(self._error_btn_style())
-        
+
         self._update_start_button_visibility()
+
+        # Pulsing glow on progress bar
+        self._progress_glow = QGraphicsDropShadowEffect(self.progress_bar)
+        self._progress_glow.setBlurRadius(5)
+        self._progress_glow.setOffset(0, 0)
+        self._progress_glow.setColor(QColor(COLORS['accent']))
+        self.progress_bar.setGraphicsEffect(self._progress_glow)
+        self._progress_glow_anim = pulse_glow(self._progress_glow, duration=2000)
     
     def on_workflow_finished(self):
         """Called when workflow completes."""
@@ -1488,19 +1527,49 @@ class MainWindow(QMainWindow):
         self.btn_start_workflow.setEnabled(True)
         self.btn_cancel.hide()
         self.btn_pause_workflow.hide()
-        
+
         # Restore START INDEXING button
         self.btn_start_indexing.setText("▶ START INDEXING")
         self.btn_start_indexing.setStyleSheet(self._success_btn_style())
-        
+
         self.update_workflow_queue_display()
         self._update_start_button_visibility()
         self.mark_dirty()
         self.toast_manager.show_toast("Workflow completed successfully", "success")
+
+        # Stop progress glow
+        if hasattr(self, '_progress_glow_anim') and self._progress_glow_anim:
+            self._progress_glow_anim.stop()
+            self._progress_glow_anim = None
+        if hasattr(self, '_progress_glow'):
+            self.progress_bar.setGraphicsEffect(None)
+
+        # Success checkmark bounce near progress bar
+        self._success_check = QLabel("\u2713")
+        self._success_check.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['success']};
+                font-size: 18px;
+                font-weight: bold;
+                background: transparent;
+            }}
+        """)
+        self._success_check.setParent(self.status_bar)
+        self._success_check.move(self.progress_bar.x() + self.progress_bar.width() + 8,
+                                  self.progress_bar.y() - 2)
+        self._success_check.show()
+        self._success_check_anim = scale_bounce(self._success_check, duration=300)
+        QTimer.singleShot(1500, self._remove_success_check)
         
         # Refresh tree highlighting for all items
         self._refresh_tree_highlighting()
     
+    def _remove_success_check(self):
+        """Remove the success checkmark label after animation."""
+        if hasattr(self, '_success_check') and self._success_check:
+            self._success_check_anim2 = fade_out(self._success_check, duration=ANIM_FAST,
+                callback=lambda: self._success_check.deleteLater() if self._success_check else None)
+
     def _refresh_tree_highlighting(self):
         """Refresh highlighting for all tree items."""
         root = self.tree.invisibleRootItem()
@@ -1647,9 +1716,11 @@ class MainWindow(QMainWindow):
 
         # Container to hold tree and grid (swap visibility)
         self._left_stack = QStackedWidget()
-        self._left_stack.addWidget(self.tree)        # index 0
-        self._left_stack.addWidget(self.grid_scroll)  # index 1
+        self._left_stack.addWidget(self.tree)             # index 0 — list
+        self._left_stack.addWidget(self.grid_scroll)      # index 1 — grid
+        self._left_stack.addWidget(self.grid_empty_state)  # index 2 — empty state
         self._left_stack.setCurrentIndex(0)
+        self._view_anim = None  # prevent GC on crossfade
 
         self.media_splitter.addWidget(self._left_stack)
 

@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit,
 from PyQt6.QtCore import Qt, pyqtSignal, QDateTime, QPropertyAnimation, QEasingCurve, pyqtProperty
 from PyQt6.QtGui import QTextCharFormat, QColor, QTextCursor
 from config import COLORS
+from gui.theme import ANIM_SLOW
 from enum import Enum
 
 class LogLevel(Enum):
@@ -84,7 +85,7 @@ class ActivityLog(QWidget):
                 font-weight: bold;
             }}
             QPushButton:hover {{
-                background: #35373C;
+                background: {COLORS['surface_hover']};
                 border-color: {COLORS['accent']};
             }}
         """)
@@ -114,7 +115,7 @@ class ActivityLog(QWidget):
         
         # Animation for smooth expand/collapse
         self.animation = QPropertyAnimation(self, b"maximumHeight")
-        self.animation.setDuration(300)
+        self.animation.setDuration(ANIM_SLOW)
         self.animation.setEasingCurve(QEasingCurve.Type.OutCubic)
     
     def toggle_auto_scroll(self, state):

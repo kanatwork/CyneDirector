@@ -31,7 +31,7 @@ class EmbeddedPlayerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         logger.debug("EmbeddedPlayerWidget initialized")
-        self.setStyleSheet("background: #000; color: #FFF;")
+        self.setStyleSheet(f"background: {COLORS['bg_app']}; color: {COLORS['text_main']};")
         
         # Enable Keyboard Shortcuts
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -77,7 +77,7 @@ class EmbeddedPlayerWidget(QWidget):
         # 2. Minimal Controls Container
         self.controls = QWidget()
         self.controls.setFixedHeight(60)
-        self.controls.setStyleSheet("background: #1E1E1E; border-top: 1px solid #333;")
+        self.controls.setStyleSheet(f"background: {COLORS['bg_panel']}; border-top: 1px solid {COLORS['border']};")
         ctrl_layout = QVBoxLayout(self.controls)
         ctrl_layout.setContentsMargins(10, 5, 10, 5)
         
@@ -89,7 +89,7 @@ class EmbeddedPlayerWidget(QWidget):
         self.slider.sliderReleased.connect(self.on_slider_released)
         self.slider.setCursor(Qt.CursorShape.PointingHandCursor)
         self.slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{ height: 4px; background: #333; border-radius: 2px; }}
+            QSlider::groove:horizontal {{ height: 4px; background: {COLORS['border']}; border-radius: 2px; }}
             QSlider::handle:horizontal {{ background: {COLORS['accent']}; width: 12px; margin: -4px 0; border-radius: 6px; }}
             QSlider::sub-page:horizontal {{ background: {COLORS['accent']}; border-radius: 2px; }}
         """)
@@ -105,15 +105,15 @@ class EmbeddedPlayerWidget(QWidget):
         self.btn_play.clicked.connect(self.toggle_play)
         self.btn_play.setFixedSize(32, 32)
         self.btn_play.setStyleSheet(f"""
-            QPushButton {{ border: 1px solid #555; border-radius: 16px; background: #333; }}
-            QPushButton:hover {{ background: #444; border-color: {COLORS['accent']}; }}
+            QPushButton {{ border: 1px solid {COLORS['text_disabled']}; border-radius: 16px; background: {COLORS['border']}; }}
+            QPushButton:hover {{ background: {COLORS['surface_hover']}; border-color: {COLORS['accent']}; }}
         """)
         self.btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_row.addWidget(self.btn_play)
         
         # Time Label
         self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_time.setStyleSheet("font-family: monospace; font-size: 11px; color: #CCC; font-weight: bold;")
+        self.lbl_time.setStyleSheet(f"font-family: monospace; font-size: 11px; color: {COLORS['text_main']}; font-weight: bold;")
         btn_row.addWidget(self.lbl_time)
         
         btn_row.addStretch()

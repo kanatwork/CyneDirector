@@ -77,7 +77,7 @@ class ShortcutsPanel(QDialog):
         btn_close.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
                 border: none;
                 padding: 8px 20px;
                 font-size: 12px;

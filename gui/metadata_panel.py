@@ -46,7 +46,7 @@ class MetadataPanel(QWidget):
         self.btn_edit.clicked.connect(self.toggle_edit_mode)
         self.btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_edit.setStyleSheet(f"""
-            QPushButton {{ background: transparent; border: 1px solid #555; color: {COLORS['text_main']}; border-radius: 4px; font-size: 11px; font-weight: bold; }}
+            QPushButton {{ background: transparent; border: 1px solid {COLORS['text_disabled']}; color: {COLORS['text_main']}; border-radius: 4px; font-size: 11px; font-weight: bold; }}
             QPushButton:checked {{ background: {COLORS['accent']}; color: black; border: none; }}
             QPushButton:hover {{ border-color: {COLORS['accent']}; color: {COLORS['accent']}; }}
             QPushButton:checked:hover {{ color: black; }}
@@ -217,7 +217,7 @@ class MetadataPanel(QWidget):
         self.btn_save.hide() 
         self.btn_save.setStyleSheet(f"""
             QPushButton {{
-                background: {COLORS['accent']}; color: #121212;
+                background: {COLORS['accent']}; color: {COLORS['text_on_accent']};
                 border: none; border-radius: 4px; font-weight: 800; font-size: 12px;
                 letter-spacing: 0.5px;
             }}
@@ -231,7 +231,7 @@ class MetadataPanel(QWidget):
         self.btn_start_process.setFixedHeight(40)
         self.btn_start_process.setStyleSheet(f"""
             QPushButton {{
-                background: {COLORS['accent']}; color: #121212;
+                background: {COLORS['accent']}; color: {COLORS['text_on_accent']};
                 border: none; border-radius: 4px; 
                 font-weight: 800; font-size: 12px;
                 letter-spacing: 0.5px;
@@ -241,8 +241,8 @@ class MetadataPanel(QWidget):
             }}
             QPushButton:disabled {{
                 background: {COLORS['bg_app']};
-                color: #666;
-                border-color: #333;
+                color: {COLORS['text_dim']};
+                border-color: {COLORS['border']};
             }}
         """)
         btn_layout.addWidget(self.btn_start_process)
@@ -264,8 +264,8 @@ class MetadataPanel(QWidget):
             }}
             QPushButton:disabled {{
                 background: {COLORS['bg_app']};
-                color: #666;
-                border-color: #333;
+                color: {COLORS['text_dim']};
+                border-color: {COLORS['border']};
             }}
         """)
         btn_layout.addWidget(self.btn_export_srt)
@@ -333,7 +333,7 @@ class MetadataPanel(QWidget):
         btn_apply_tags.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
                 border: none;
                 padding: 8px;
                 border-radius: 4px;
@@ -421,7 +421,7 @@ class MetadataPanel(QWidget):
         if read_only:
             return f"""
                 QTextEdit {{
-                    background: {COLORS['bg_app']}; color: #CCC;
+                    background: {COLORS['bg_app']}; color: {COLORS['text_main']};
                     border: 1px solid transparent; padding: 8px; border-radius: 4px;
                     font-size: 12px; font-family: 'Segoe UI', sans-serif;
                 }}

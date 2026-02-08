@@ -78,7 +78,7 @@ class QueryBuilderDialog(QDialog):
             }}
             QListWidget::item:selected {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
             }}
         """)
         
@@ -157,7 +157,7 @@ class QueryBuilderDialog(QDialog):
         btn_add.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
                 border: none;
                 border-radius: 4px;
                 padding: 5px 15px;
@@ -268,7 +268,7 @@ class QueryBuilderDialog(QDialog):
         btn_ok.setStyleSheet(f"""
             QPushButton {{
                 background: {COLORS['accent']};
-                color: #121212;
+                color: {COLORS['text_on_accent']};
                 border: none;
                 border-radius: 4px;
                 padding: 8px 20px;

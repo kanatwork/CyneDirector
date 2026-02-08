@@ -93,7 +93,19 @@ def main():
     
     # 3. Apply Global Styles
     app.setStyleSheet(config.STYLESHEET)
-    
+
+    # 3b. Check Windows reduce-motion preference
+    try:
+        from gui.animations import set_reduce_motion
+        if sys.platform == 'win32':
+            val = ctypes.c_bool()
+            # SPI_GETCLIENTAREAANIMATION = 0x1042
+            ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(val), 0)
+            if not val.value:
+                set_reduce_motion(True)
+    except Exception:
+        pass
+
     # 4. Launch Project Dialog (The "Home Page")
     try:
         from gui.project_dialog import ProjectDialog

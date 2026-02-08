@@ -29,7 +29,7 @@ class PlayerWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         logger.debug("PlayerWindow initialized")
-        self.setStyleSheet("background: #000; color: #FFF;")
+        self.setStyleSheet(f"background: {COLORS['bg_app']}; color: {COLORS['text_main']};")
         
         # Enable Keyboard Shortcuts (Space, J, K, L, Arrows)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -72,7 +72,7 @@ class PlayerWindow(QWidget):
         # 2. Controls Container
         self.controls = QWidget()
         self.controls.setFixedHeight(90)
-        self.controls.setStyleSheet("background: #1E1E1E; border-top: 1px solid #333;")
+        self.controls.setStyleSheet(f"background: {COLORS['bg_panel']}; border-top: 1px solid {COLORS['border']};")
         ctrl_layout = QVBoxLayout(self.controls)
         ctrl_layout.setContentsMargins(15, 5, 15, 10)
         
@@ -84,7 +84,7 @@ class PlayerWindow(QWidget):
         self.slider.sliderReleased.connect(self.on_slider_released)
         self.slider.setCursor(Qt.CursorShape.PointingHandCursor)
         self.slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{ height: 6px; background: #333; border-radius: 3px; }}
+            QSlider::groove:horizontal {{ height: 6px; background: {COLORS['border']}; border-radius: 3px; }}
             QSlider::handle:horizontal {{ background: {COLORS['accent']}; width: 14px; margin: -5px 0; border-radius: 7px; }}
             QSlider::sub-page:horizontal {{ background: {COLORS['accent']}; border-radius: 3px; }}
         """)
@@ -100,27 +100,27 @@ class PlayerWindow(QWidget):
         self.btn_play.clicked.connect(self.toggle_play)
         self.btn_play.setFixedSize(40, 40)
         self.btn_play.setStyleSheet(f"""
-            QPushButton {{ border: 1px solid #555; border-radius: 20px; background: #333; }}
-            QPushButton:hover {{ background: #444; border-color: {COLORS['accent']}; }}
+            QPushButton {{ border: 1px solid {COLORS['text_disabled']}; border-radius: 20px; background: {COLORS['border']}; }}
+            QPushButton:hover {{ background: {COLORS['surface_hover']}; border-color: {COLORS['accent']}; }}
         """)
         self.btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_row.addWidget(self.btn_play)
         
         # Time Label
         self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_time.setStyleSheet("font-family: monospace; font-size: 13px; color: #CCC; font-weight: bold;")
+        self.lbl_time.setStyleSheet(f"font-family: monospace; font-size: 13px; color: {COLORS['text_main']}; font-weight: bold;")
         btn_row.addWidget(self.lbl_time)
         
         # Speed Label
         self.lbl_speed = QLabel("1x")
-        self.lbl_speed.setStyleSheet("color: #777; font-size: 11px; margin-left: 10px;")
+        self.lbl_speed.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; margin-left: 10px;")
         btn_row.addWidget(self.lbl_speed)
 
         btn_row.addStretch()
         
         # Volume Slider
         vol_icon = QLabel("VOL")
-        vol_icon.setStyleSheet("color: #777; font-size: 11px;")
+        vol_icon.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px;")
         btn_row.addWidget(vol_icon)
         
         self.vol_slider = QSlider(Qt.Orientation.Horizontal)
@@ -128,10 +128,10 @@ class PlayerWindow(QWidget):
         self.vol_slider.setValue(70)
         self.vol_slider.setFixedWidth(100)
         self.vol_slider.valueChanged.connect(self.set_volume)
-        self.vol_slider.setStyleSheet("""
-            QSlider::groove:horizontal { height: 4px; background: #444; }
-            QSlider::handle:horizontal { background: #FFF; width: 10px; margin: -3px 0; border-radius: 5px; }
-            QSlider::sub-page:horizontal { background: #AAA; }
+        self.vol_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{ height: 4px; background: {COLORS['border']}; }}
+            QSlider::handle:horizontal {{ background: {COLORS['text_main']}; width: 10px; margin: -3px 0; border-radius: 5px; }}
+            QSlider::sub-page:horizontal {{ background: {COLORS['text_dim']}; }}
         """)
         btn_row.addWidget(self.vol_slider)
 

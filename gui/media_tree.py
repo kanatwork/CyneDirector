@@ -519,7 +519,7 @@ class MediaTree(QTreeWidget):
         selected_items = self.selectedItems()
         
         menu = QMenu(self)
-        menu.setStyleSheet(f"QMenu {{ background: #252526; color: white; border: 1px solid #444; }} QMenu::item:selected {{ background: {COLORS['accent']}; color: black; }}")
+        menu.setStyleSheet(f"QMenu {{ background: {COLORS['bg_input']}; color: white; border: 1px solid {COLORS['border']}; }} QMenu::item:selected {{ background: {COLORS['accent']}; color: {COLORS['text_on_accent']}; }}")
         
         # Batch operations
         if selected_files:
@@ -1114,7 +1114,7 @@ class MediaTree(QTreeWidget):
             item.setForeground(col, QBrush(QColor(COLORS['accent'])))
         else:
             item.setText(col, "⬜")
-            item.setForeground(col, QBrush(QColor("#444")))
+            item.setForeground(col, QBrush(QColor(COLORS['border'])))
     
     def _get_integration_status(self, item):
         """Get combined integration status for tooltip."""
@@ -1219,9 +1219,9 @@ class MediaTree(QTreeWidget):
         if icon_text == "✅":
             item.setForeground(column_index, QBrush(QColor(COLORS['accent'])))
         elif icon_text == "⏳":
-            item.setForeground(column_index, QBrush(QColor("#FFEB3B"))) # Yellow
+            item.setForeground(column_index, QBrush(QColor(COLORS['warning']))) # Yellow
         else:
-            item.setForeground(column_index, QBrush(QColor("#444")))
+            item.setForeground(column_index, QBrush(QColor(COLORS['border'])))
         
         if summary_text is not None:
             item.setText(8, summary_text)  # AI Summary is column 8 (unchanged)
