@@ -69,6 +69,17 @@ class MainWindow(QMainWindow):
         import config as _cfg
         _cfg.load_project_settings(self.project_path)
 
+        # Apply device preference from settings (before any models load)
+        from core.ai_models import AIBackend
+        AIBackend().configure_from_settings()
+
+        # Sync global flags from per-project settings
+        _cfg.USE_BLIP2 = (_cfg.get_setting("blip_variant") == "blip-2")
+        _cfg.GENERATE_PROXIES = _cfg.get_setting("generate_proxies", False)
+        deepl_key = _cfg.get_setting("deepl_api_key", "")
+        _cfg.DEEPL_API_KEY = deepl_key
+        _cfg.TRANSLATION_METHOD = "deepl" if deepl_key else "whisper"
+
         # Initialize Workflow Manager
         logger.debug("Initializing WorkflowManager")
         self.workflow_manager = WorkflowManager(self.project_path)
@@ -92,15 +103,34 @@ class MainWindow(QMainWindow):
         self.load_project()
 
         # File watcher — monitors project dir for new/modified videos
+        # Only start if auto_index_on_change setting is enabled
         self.file_watcher = None
-        try:
-            from workers.file_watcher import FileWatcherWorker
-            self.file_watcher = FileWatcherWorker(self.project_path)
-            self.file_watcher.new_file_signal.connect(self._on_watched_new_file)
-            self.file_watcher.file_modified_signal.connect(self._on_watched_file_modified)
-            self.file_watcher.start()
-        except Exception as e:
-            logger.warning(f"File watcher unavailable: {e}")
+        import config as _cfg_init
+        if _cfg_init.get_setting("auto_index_on_change", True):
+            try:
+                from workers.file_watcher import FileWatcherWorker
+                self.file_watcher = FileWatcherWorker(self.project_path)
+                self.file_watcher.new_file_signal.connect(self._on_watched_new_file)
+                self.file_watcher.file_modified_signal.connect(self._on_watched_file_modified)
+                self.file_watcher.start()
+            except Exception as e:
+                logger.warning(f"File watcher unavailable: {e}")
+        else:
+            logger.info("File watcher disabled by auto_index_on_change setting")
+
+        # --- Apply sidebar_default from settings on launch ---
+        sidebar_pref = _cfg_init.get_setting("sidebar_default", "expanded")
+        if sidebar_pref == "collapsed" and not self.sidebar_collapsed:
+            self.toggle_sidebar()
+
+        # --- Apply accent_color from settings on launch ---
+        accent = _cfg_init.get_setting("accent_color", "#6366f1")
+        if accent != COLORS.get('accent'):
+            from gui.theme import COLORS as THEME_COLORS, generate_stylesheet
+            THEME_COLORS['accent'] = accent
+            COLORS['accent'] = accent
+            _cfg_init.STYLESHEET = generate_stylesheet()
+            self.setStyleSheet(_cfg_init.STYLESHEET)
 
         logger.debug("MainWindow initialization complete")
 
@@ -1918,13 +1948,56 @@ class MainWindow(QMainWindow):
     def _apply_settings_changes(self):
         """Sync runtime config after settings are saved."""
         import config as _cfg
-        # Update USE_BLIP2 at runtime
+
+        # --- Device preference ---
+        from core.ai_models import AIBackend
+        AIBackend().configure_from_settings()
+
+        # --- Model flags ---
         _cfg.USE_BLIP2 = (_cfg.get_setting("blip_variant") == "blip-2")
         _cfg.GENERATE_PROXIES = _cfg.get_setting("generate_proxies", False)
-        # Update DeepL key
+
+        # --- DeepL key ---
         deepl_key = _cfg.get_setting("deepl_api_key", "")
         _cfg.DEEPL_API_KEY = deepl_key
         _cfg.TRANSLATION_METHOD = "deepl" if deepl_key else "whisper"
+
+        # --- File watcher (auto_index_on_change) ---
+        auto_index = _cfg.get_setting("auto_index_on_change", True)
+        if auto_index and self.file_watcher is None:
+            try:
+                from workers.file_watcher import FileWatcherWorker
+                self.file_watcher = FileWatcherWorker(self.project_path)
+                self.file_watcher.new_file_signal.connect(self._on_watched_new_file)
+                self.file_watcher.file_modified_signal.connect(self._on_watched_file_modified)
+                self.file_watcher.start()
+                logger.info("File watcher started (auto_index_on_change enabled)")
+            except Exception as e:
+                logger.warning(f"File watcher unavailable: {e}")
+        elif not auto_index and self.file_watcher is not None:
+            try:
+                self.file_watcher.stop()
+                self.file_watcher.wait(2000)
+            except Exception:
+                pass
+            self.file_watcher = None
+            logger.info("File watcher stopped (auto_index_on_change disabled)")
+
+        # --- Sidebar default ---
+        sidebar_pref = _cfg.get_setting("sidebar_default", "expanded")
+        should_collapse = (sidebar_pref == "collapsed")
+        if should_collapse != self.sidebar_collapsed:
+            self.toggle_sidebar()
+
+        # --- Accent color — update theme tokens and regenerate stylesheet ---
+        accent = _cfg.get_setting("accent_color", "#6366f1")
+        if accent != COLORS.get('accent'):
+            from gui.theme import COLORS as THEME_COLORS, generate_stylesheet
+            THEME_COLORS['accent'] = accent
+            COLORS['accent'] = accent
+            _cfg.STYLESHEET = generate_stylesheet()
+            self.setStyleSheet(_cfg.STYLESHEET)
+
         logger.debug("Settings applied to runtime config")
 
     def open_project_handler(self):

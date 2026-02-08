@@ -66,9 +66,39 @@ class AIBackend:
             
         return cls._instance
 
-    def _detect_best_device(self):
-        """Select the best available compute backend: CUDA > MPS > CPU."""
+    def _detect_best_device(self, preferred=None):
+        """Select the best available compute backend: CUDA > MPS > CPU.
 
+        Args:
+            preferred: Optional device override from settings
+                       ("auto", "cuda", "mps", "cpu").  ``None`` and
+                       ``"auto"`` both trigger auto-detection.
+        """
+        if preferred and preferred not in ("auto", None):
+            preferred = preferred.lower()
+            if preferred == "cuda" and torch.cuda.is_available():
+                try:
+                    torch.backends.cuda.matmul.allow_tf32 = True
+                    torch.backends.cudnn.allow_tf32 = True
+                    torch.backends.cudnn.benchmark = True
+                    conv = torch.nn.Conv2d(1, 1, 3).cuda()
+                    _ = conv(torch.randn(1, 1, 10, 10).cuda())
+                    print(f"AI BACKEND: CUDA (forced by settings)")
+                    return "cuda", torch.float16
+                except RuntimeError as e:
+                    logger.warning(f"CUDA requested but failed: {e}, falling through")
+            elif preferred == "mps" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                try:
+                    _ = torch.zeros(1, device="mps")
+                    print("AI BACKEND: MPS (forced by settings)")
+                    return "mps", torch.float32
+                except RuntimeError as e:
+                    logger.warning(f"MPS requested but failed: {e}, falling through")
+            elif preferred == "cpu":
+                print("AI BACKEND: CPU (forced by settings)")
+                return "cpu", torch.float32
+
+        # --- Auto-detection ---
         # --- 1. Try CUDA (NVIDIA) ---
         if torch.cuda.is_available():
             try:
@@ -112,6 +142,43 @@ class AIBackend:
         print("   Performance will be significantly slower than GPU.")
         return "cpu", torch.float32
 
+    def configure_from_settings(self):
+        """Re-apply device preference from per-project settings.
+
+        Safe to call after project settings are loaded.  If the requested
+        device differs from the current one and no models are loaded,
+        the backend switches devices immediately.  If models are already
+        loaded it logs a warning and skips (a restart is needed).
+        """
+        try:
+            from config import get_setting
+            preferred = get_setting("device", "auto")
+        except Exception:
+            return  # settings not yet available — keep auto-detected
+
+        if preferred in (None, "auto"):
+            return  # nothing to override
+
+        target_device, target_dtype = self._detect_best_device(preferred)
+        if target_device == self.device:
+            return  # already on the right device
+
+        # Only switch if no models are loaded yet
+        models_loaded = any([
+            self.clip_model, self.blip_model, self.whisper_model,
+            self.yolo_model, self.llm_model
+        ])
+        if models_loaded:
+            logger.warning(
+                f"Device change requested ({self.device} → {target_device}) "
+                "but models are already loaded — restart required"
+            )
+            return
+
+        logger.info(f"Switching AI device: {self.device} → {target_device}")
+        self.device = target_device
+        self.dtype = target_dtype
+
     # --- 1. CLIP (Keywords) ---
     def load_clip(self):
         with self.load_lock:
@@ -153,9 +220,15 @@ class AIBackend:
         with self.load_lock:
             if self.blip_model: return self.blip_model, self.blip_processor
 
-            from config import USE_BLIP2
+            # Check per-project setting first, fall back to global flag
+            try:
+                from config import get_setting, USE_BLIP2
+                use_blip2 = get_setting("blip_variant", "blip-large") == "blip-2"
+            except Exception:
+                from config import USE_BLIP2
+                use_blip2 = USE_BLIP2
 
-            if USE_BLIP2:
+            if use_blip2:
                 print(f"Loading BLIP-2 (2.7B) [{self.device}]...")
                 try:
                     from transformers import Blip2Processor, Blip2ForConditionalGeneration
@@ -212,6 +285,7 @@ class AIBackend:
         the active backend and the requested quality mode.
 
         Workers should call this instead of hardcoding device strings.
+        The ``whisper_model`` setting overrides the accuracy-mode model name.
         """
         if self.device == "cuda":
             whisper_device = "cuda"
@@ -224,7 +298,16 @@ class AIBackend:
             compute_type = "int8"
             speed_model = "small"
 
-        model_name = "large-v3" if mode == "accuracy" else speed_model
+        if mode == "accuracy":
+            # Respect user's whisper_model setting (defaults to large-v3)
+            try:
+                from config import get_setting
+                model_name = get_setting("whisper_model", "large-v3")
+            except Exception:
+                model_name = "large-v3"
+        else:
+            model_name = speed_model
+
         return model_name, whisper_device, compute_type
 
     def load_whisper(self):

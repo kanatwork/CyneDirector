@@ -28,7 +28,7 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 
 | Module | Purpose |
 |---|---|
-| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, YOLOv8, Whisper, LLM models. Auto-detects GPU compute capability at import time |
+| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, YOLOv8, Whisper, LLM models. Auto-detects GPU compute capability at import time. `configure_from_settings()` applies device preference from per-project settings. `get_whisper_params()` respects `whisper_model` setting. `load_blip()` respects `blip_variant` setting. |
 | `database.py` | SQLite (metadata, WAL mode) + ChromaDB (vector embeddings). Connection-per-thread via `threading.local()` |
 | `search_engine.py` | Multi-modal semantic search with query expansion, decomposition, YOLO object matching, pagination, caching |
 | `tags.py` | Tag hierarchy and vocabulary for visual indexing |
@@ -223,6 +223,30 @@ If torch is not installed, the pre-import is silently skipped. Use `run.bat` to 
 - **Signal/Slot** for thread-to-UI communication (PyQt6 signals)
 - **Workflow Manager** for task queuing with priority levels (high/normal/low)
 - **Graceful degradation** — LLM fails → template-based summary; model unavailable → skip
+- **Settings-driven runtime** — per-project settings from `_cyne_db/settings.json` are wired to actual runtime behavior (see Settings Wiring below)
+
+### Settings Wiring (Phase 5.1)
+
+Every active setting key in `core/settings_manager.py` is wired to runtime behavior:
+
+| Setting Key | Wired To | Notes |
+|---|---|---|
+| `auto_index_on_change` | `MainWindow.__init__` + `_apply_settings_changes()` | Controls file watcher start/stop |
+| `generate_thumbnails` | `workers/indexer.py` Phase 6 | Gated by `get_setting()` per file |
+| `generate_proxies` | `workers/indexer.py` Phase 6 + `config.GENERATE_PROXIES` flag | Gated by `get_setting()` per file |
+| `batch_size` | `IndexerWorker.__init__` | `"auto"` → `get_optimal_batch_size()`, int → direct use |
+| `keyframe_interval` | `IndexerWorker.__init__` | Derives `min_interval`/`max_interval` from setting value |
+| `device` | `AIBackend.configure_from_settings()` | Called on project load and settings change; switches device if no models loaded |
+| `blip_variant` | `AIBackend.load_blip()` | Reads setting directly; falls back to `config.USE_BLIP2` |
+| `whisper_model` | `AIBackend.get_whisper_params()` | Overrides accuracy-mode model name (default `large-v3`) |
+| `sidebar_default` | `MainWindow.__init__` + `_apply_settings_changes()` | Collapses/expands sidebar to match preference |
+| `accent_color` | `MainWindow.__init__` + `_apply_settings_changes()` | Updates theme tokens and regenerates stylesheet |
+| `deepl_api_key` | `MainWindow.__init__` + `_apply_settings_changes()` | Sets `config.DEEPL_API_KEY` and `TRANSLATION_METHOD` |
+| `language_preference` | Read by translator at transcription time | No additional wiring needed |
+| `model_quality` | Informational | Workflow mode (speed/accuracy) set by UI radio buttons in workflow panel |
+| `theme` | Reserved | Single theme currently; token ready for future use |
+
+Global flags (`USE_BLIP2`, `GENERATE_PROXIES`, `DEEPL_API_KEY`, `TRANSLATION_METHOD`) are synced from per-project settings both at project load (`MainWindow.__init__`) and on settings dialog save (`_apply_settings_changes()`).
 
 ### Error Handling
 - Try/except with `logger.error(...)` at the point of failure

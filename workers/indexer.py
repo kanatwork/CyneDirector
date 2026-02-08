@@ -29,7 +29,12 @@ class IndexerWorker(QThread):
         self.project_path = project_path
         self.is_running = True
         self.mode = mode  # "speed" or "accuracy"
-        
+
+        # --- Per-project settings ---
+        from config import get_setting
+        batch_setting = get_setting("batch_size", "auto")
+        keyframe_interval = get_setting("keyframe_interval", 2)
+
         # --- Mode-based Settings ---
         # Optimize batch size based on available memory and device
         device = AIBackend().device
@@ -37,23 +42,29 @@ class IndexerWorker(QThread):
         base_batch_speed = 64
 
         if mode == "accuracy":
-            self.batch_size = get_optimal_batch_size(base_batch_accuracy, min_batch=16, max_batch=64, device=device)
-            self.min_interval = 0.5  # More frequent sampling (1 frame per 0.5-5 seconds)
-            self.max_interval = 5.0
+            auto_batch = get_optimal_batch_size(base_batch_accuracy, min_batch=16, max_batch=64, device=device)
+            self.min_interval = max(0.5, keyframe_interval / 4.0)
+            self.max_interval = max(2.0, keyframe_interval * 2.5)
             self.scene_threshold = 0.60
             self.blur_threshold = 50.0
             self.tag_threshold_percent = 0.40  # 40% of max score for accuracy mode
             self.min_frames_for_tag = 3  # Very strict: tag must appear in at least 3 frames
         else:  # speed mode
-            self.batch_size = get_optimal_batch_size(base_batch_speed, min_batch=32, max_batch=128, device=device)
-            self.min_interval = 1.0  # Current sampling (1 frame per 1.5-15 seconds)
-            self.max_interval = 15.0
+            auto_batch = get_optimal_batch_size(base_batch_speed, min_batch=32, max_batch=128, device=device)
+            self.min_interval = max(1.0, keyframe_interval / 2.0)
+            self.max_interval = max(5.0, keyframe_interval * 7.5)
             self.scene_threshold = 0.60
             self.blur_threshold = 50.0
             self.tag_threshold_percent = 0.20  # 20% of max score for speed mode
             self.min_frames_for_tag = 1  # Tag appears in at least 1 frame
-        
-        logger.info(f"Indexer initialized with batch_size={self.batch_size} (mode={mode})")
+
+        # Apply batch_size setting: "auto" uses RAM-based sizing, int overrides
+        if isinstance(batch_setting, int) and batch_setting > 0:
+            self.batch_size = batch_setting
+        else:
+            self.batch_size = auto_batch
+
+        logger.info(f"Indexer initialized with batch_size={self.batch_size} keyframe_interval={keyframe_interval}s (mode={mode})")
         log_memory_usage("IndexerWorker init")
         
         # Batch write optimization (applies to both modes)
@@ -979,14 +990,15 @@ class IndexerWorker(QThread):
                 db.update_metadata_key(video_path, "objects_yolo", yolo_detections)
 
             # --- PHASE 6: THUMBNAIL & PROXY GENERATION ---
-            thumb_dir = os.path.join(self.project_path, "_cyne_db", "thumbnails")
-            thumb_path = generate_thumbnail(video_path, thumb_dir)
-            if thumb_path:
-                db.update_metadata_key(video_path, "thumbnail_path", thumb_path)
-                self.log_signal.emit(f"  → Thumbnail saved")
+            from config import get_setting
+            if get_setting("generate_thumbnails", True):
+                thumb_dir = os.path.join(self.project_path, "_cyne_db", "thumbnails")
+                thumb_path = generate_thumbnail(video_path, thumb_dir)
+                if thumb_path:
+                    db.update_metadata_key(video_path, "thumbnail_path", thumb_path)
+                    self.log_signal.emit(f"  → Thumbnail saved")
 
-            from config import GENERATE_PROXIES
-            if GENERATE_PROXIES:
+            if get_setting("generate_proxies", False):
                 proxy_dir = os.path.join(self.project_path, "_cyne_db", "proxies")
                 proxy_path = generate_proxy(video_path, proxy_dir)
                 if proxy_path:
