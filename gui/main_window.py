@@ -1,23 +1,31 @@
 # [FILE: gui/main_window.py]
 import os
 import json
-import cv2 
+import cv2
 import sys
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QPushButton, QLabel, QProgressBar, QSplitter, 
-                             QFileDialog, QMessageBox, QFrame, 
+from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                             QPushButton, QLabel, QProgressBar, QSplitter,
+                             QFileDialog, QMessageBox, QFrame,
                              QProgressDialog, QStackedWidget, QButtonGroup,
                              QMenu, QListWidget, QListWidgetItem, QCheckBox,
-                             QRadioButton, QAbstractItemView, QComboBox)
+                             QRadioButton, QAbstractItemView, QComboBox,
+                             QScrollArea, QSizePolicy)
 from PyQt6.QtCore import Qt, QSize, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer
 from PyQt6.QtGui import QAction, QPixmap, QImage, QIcon, QColor, QShortcut, QKeySequence
 
 from config import APP_NAME, VERSION, COLORS, FILE_EXT
 from gui.media_tree import MediaTree
-from gui.search_tab import SearchTab
-from gui.metadata_panel import MetadataPanel 
+from gui.search_tab import SearchTab, FlowLayout
+from gui.metadata_panel import MetadataPanel
 from gui.activity_log import ActivityLog, LogLevel
 from gui.toast_notification import ToastManager
+from gui.animations import slide_width, slide_height
+from gui.widgets.search_bar import SearchBar
+from gui.widgets.thumbnail_card import ThumbnailCard
+from gui.widgets.animated_toggle import AnimatedToggle
+from gui.widgets.status_indicator import StatusIndicator
+from gui.theme import (ANIM_FAST, ANIM_NORMAL, ANIM_SLOW,
+                        SIDEBAR_EXPANDED, SIDEBAR_COLLAPSED)
 from core.ai_models import AIBackend
 from core.workflow_manager import WorkflowManager, OperationType, OperationStatus
 from core.logger import get_logger
@@ -77,26 +85,80 @@ class MainWindow(QMainWindow):
         self.search_tab.set_project_path(self.project_path)
         logger.debug("Loading project")
         self.load_project()
+
+        # File watcher — monitors project dir for new/modified videos
+        self.file_watcher = None
+        try:
+            from workers.file_watcher import FileWatcherWorker
+            self.file_watcher = FileWatcherWorker(self.project_path)
+            self.file_watcher.new_file_signal.connect(self._on_watched_new_file)
+            self.file_watcher.file_modified_signal.connect(self._on_watched_file_modified)
+            self.file_watcher.start()
+        except Exception as e:
+            logger.warning(f"File watcher unavailable: {e}")
+
         logger.debug("MainWindow initialization complete")
 
     def setup_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        
+
         main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # --- 1. SIDEBAR ---
+        # ── 1. COLLAPSIBLE SIDEBAR ───────────────────────────────────
         self.sidebar = QWidget()
         self.sidebar.setObjectName("Sidebar")
-        self.sidebar.setFixedWidth(140)
+        self.sidebar.setMinimumWidth(SIDEBAR_EXPANDED)
+        self.sidebar.setMaximumWidth(SIDEBAR_EXPANDED)
         self.sidebar_collapsed = False
-        
-        sb_layout = QVBoxLayout(self.sidebar)
-        sb_layout.setContentsMargins(12, 20, 12, 20)
-        sb_layout.setSpacing(12)
+        self._sidebar_anim = None  # prevent GC on animation
 
+        sb_layout = QVBoxLayout(self.sidebar)
+        sb_layout.setContentsMargins(8, 12, 8, 12)
+        sb_layout.setSpacing(6)
+
+        # Hamburger toggle button
+        self.btn_toggle_sidebar = QPushButton("\u2630")  # ≡
+        self.btn_toggle_sidebar.setFixedSize(40, 32)
+        self.btn_toggle_sidebar.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_toggle_sidebar.setToolTip("Toggle sidebar (Ctrl+B)")
+        self.btn_toggle_sidebar.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                color: {COLORS['text_dim']};
+                font-size: 18px;
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['bg_input']};
+                color: {COLORS['accent']};
+            }}
+        """)
+        self.btn_toggle_sidebar.clicked.connect(self.toggle_sidebar)
+        sb_layout.addWidget(self.btn_toggle_sidebar, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        # Project name label (below hamburger)
+        self.sidebar_project_label = QLabel(self.project_name)
+        self.sidebar_project_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_dim']};
+                font-size: 10px;
+                font-weight: 600;
+                background: transparent;
+                padding: 0 4px;
+            }}
+        """)
+        self.sidebar_project_label.setWordWrap(False)
+        from PyQt6.QtCore import Qt as _Qt
+        self.sidebar_project_label.setTextFormat(_Qt.TextFormat.PlainText)
+        sb_layout.addWidget(self.sidebar_project_label)
+
+        sb_layout.addSpacing(8)
+
+        # Navigation buttons
         self.nav_group = QButtonGroup()
         self.nav_group.setExclusive(True)
 
@@ -104,45 +166,38 @@ class MainWindow(QMainWindow):
             """Create navigation button with icon and label."""
             btn = QPushButton()
             btn.setCheckable(True)
-            btn.setFixedSize(116, 60)
+            btn.setFixedHeight(48)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            
-            # Create layout for icon and text
-            btn_layout = QVBoxLayout(btn)
-            btn_layout.setContentsMargins(10, 5, 10, 5)  # Reduced vertical padding to prevent cropping
-            btn_layout.setSpacing(3)  # Reduced spacing
-            
-            # Icon label
+
+            btn_layout = QHBoxLayout(btn)
+            btn_layout.setContentsMargins(10, 4, 10, 4)
+            btn_layout.setSpacing(10)
+
             icon_label = QLabel(icon)
             icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            icon_label.setFixedWidth(24)
             icon_label.setStyleSheet(f"""
                 QLabel {{
                     color: {COLORS['text_dim']};
-                    font-size: 22px;
+                    font-size: 20px;
                     background: transparent;
                     padding: 0px;
                 }}
             """)
             btn_layout.addWidget(icon_label)
-            
-            # Text label
-            text_label = QLabel(text)
-            text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            text_label.setWordWrap(True)  # Allow text wrapping
+
+            text_label = QLabel(text.replace("\n", " "))
             text_label.setStyleSheet(f"""
                 QLabel {{
                     color: {COLORS['text_dim']};
-                    font-size: 10px;
+                    font-size: 11px;
                     font-weight: 600;
                     background: transparent;
                     letter-spacing: 0.5px;
-                    padding: 0px;
-                    line-height: 1.2;
                 }}
             """)
-            btn_layout.addWidget(text_label)
-            
-            # Button styling
+            btn_layout.addWidget(text_label, stretch=1)
+
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background: transparent;
@@ -157,221 +212,193 @@ class MainWindow(QMainWindow):
                     border-left: 3px solid {COLORS['accent']};
                 }}
             """)
-            
-            # Tooltip with shortcut
-            btn.setToolTip(f"{text} ({shortcut})")
-            
-            # Store references for dynamic styling
+
+            btn.setToolTip(f"{text.replace(chr(10), ' ')} ({shortcut})")
             btn.icon_label = icon_label
             btn.text_label = text_label
-            
+
             self.nav_group.addButton(btn, id)
             sb_layout.addWidget(btn)
             return btn
 
-        self.btn_nav_media = create_nav_btn("📁", "MEDIA\nLIBRARY", "Ctrl+1", 0)
-        self.btn_nav_search = create_nav_btn("🔍", "SMART\nSEARCH", "Ctrl+2", 1)
-        
+        self.btn_nav_media = create_nav_btn("\U0001f4c1", "MEDIA\nLIBRARY", "Ctrl+1", 0)
+        self.btn_nav_search = create_nav_btn("\U0001f50d", "SMART\nSEARCH", "Ctrl+2", 1)
+        self.btn_nav_faces = create_nav_btn("\U0001f464", "FACES", "Ctrl+3", 2)
+        self.btn_nav_tags = create_nav_btn("\U0001f3f7\ufe0f", "TAGS", "Ctrl+4", 3)
+
+        self._nav_buttons = [self.btn_nav_media, self.btn_nav_search,
+                             self.btn_nav_faces, self.btn_nav_tags]
+
         # Update icon/text colors on state change
         def update_btn_style(btn, checked):
-            if checked:
-                btn.icon_label.setStyleSheet(f"""
-                    QLabel {{
-                        color: {COLORS['accent']};
-                        font-size: 22px;
-                        background: transparent;
-                        padding: 0px;
-                    }}
-                """)
-                btn.text_label.setStyleSheet(f"""
-                    QLabel {{
-                        color: {COLORS['accent']};
-                        font-size: 10px;
-                        font-weight: 700;
-                        background: transparent;
-                        letter-spacing: 0.5px;
-                        padding: 0px;
-                        line-height: 1.2;
-                    }}
-                """)
-            else:
-                btn.icon_label.setStyleSheet(f"""
-                    QLabel {{
-                        color: {COLORS['text_dim']};
-                        font-size: 22px;
-                        background: transparent;
-                        padding: 0px;
-                    }}
-                """)
-                btn.text_label.setStyleSheet(f"""
-                    QLabel {{
-                        color: {COLORS['text_dim']};
-                        font-size: 10px;
-                        font-weight: 600;
-                        background: transparent;
-                        letter-spacing: 0.5px;
-                        padding: 0px;
-                        line-height: 1.2;
-                    }}
-                """)
-        
-        self.btn_nav_media.toggled.connect(lambda checked: update_btn_style(self.btn_nav_media, checked))
-        self.btn_nav_search.toggled.connect(lambda checked: update_btn_style(self.btn_nav_search, checked))
-        
+            color = COLORS['accent'] if checked else COLORS['text_dim']
+            weight = 700 if checked else 600
+            btn.icon_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {color};
+                    font-size: 20px;
+                    background: transparent;
+                    padding: 0px;
+                }}
+            """)
+            btn.text_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {color};
+                    font-size: 11px;
+                    font-weight: {weight};
+                    background: transparent;
+                    letter-spacing: 0.5px;
+                }}
+            """)
+
+        for nav_btn in self._nav_buttons:
+            nav_btn.toggled.connect(lambda checked, b=nav_btn: update_btn_style(b, checked))
+
         self.nav_group.buttonClicked.connect(self.switch_tab)
-        
-        sb_layout.addStretch() 
-        
-        lbl_ver = QLabel(VERSION)
-        lbl_ver.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 9px;")
-        lbl_ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sb_layout.addWidget(lbl_ver)
+
+        sb_layout.addStretch()
+
+        self.version_label = QLabel(VERSION)
+        self.version_label.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 9px;")
+        self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sb_layout.addWidget(self.version_label)
 
         main_layout.addWidget(self.sidebar)
 
-        # --- 2. MAIN CONTENT AREA ---
+        # ── 2. MAIN CONTENT AREA ────────────────────────────────────
         content_area = QWidget()
         ca_layout = QVBoxLayout(content_area)
-        ca_layout.setContentsMargins(0,0,0,0)
+        ca_layout.setContentsMargins(0, 0, 0, 0)
         ca_layout.setSpacing(0)
 
-        # A. Top Action Bar - Reorganized into 3 zones
+        # A. Command Bar (52px) — replaces old 60px top_bar
         self.top_bar = QWidget()
         self.top_bar.setStyleSheet(f"background: {COLORS['bg_app']}; border-bottom: 1px solid {COLORS['border']};")
-        self.top_bar.setFixedHeight(60)
+        self.top_bar.setFixedHeight(52)
         tb_layout = QHBoxLayout(self.top_bar)
-        tb_layout.setContentsMargins(20, 0, 20, 0)
-        tb_layout.setSpacing(20)
-        
-        # --- LEFT ZONE (30%): Project Info ---
+        tb_layout.setContentsMargins(16, 0, 16, 0)
+        tb_layout.setSpacing(12)
+
+        # --- LEFT: Project Info ---
         left_zone = QWidget()
         left_layout = QHBoxLayout(left_zone)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(10)
-        
-        # Project name with icon
-        project_icon = QLabel("📁")
-        project_icon.setStyleSheet(f"color: {COLORS['accent']}; font-size: 16px;")
+        left_layout.setSpacing(8)
+
+        project_icon = QLabel("\U0001f4c1")
+        project_icon.setStyleSheet(f"color: {COLORS['accent']}; font-size: 14px;")
         left_layout.addWidget(project_icon)
-        
+
         self.lbl_title = QLabel(self.project_name.upper())
         self.lbl_title.setStyleSheet(f"""
             color: {COLORS['accent']};
             font-weight: 900;
-            font-size: 15px;
+            font-size: 13px;
             letter-spacing: 1.5px;
-            padding: 4px 12px;
+            padding: 3px 10px;
             background: {COLORS['bg_input']};
             border-radius: 6px;
             border: 1px solid {COLORS['border']};
         """)
         left_layout.addWidget(self.lbl_title)
         left_layout.addStretch()
-        
-        tb_layout.addWidget(left_zone, stretch=3)
-        
-        # Divider
-        divider_left = QFrame()
-        divider_left.setFrameShape(QFrame.Shape.VLine)
-        divider_left.setStyleSheet(f"background: {COLORS['border']}; max-width: 1px;")
-        divider_left.setFixedHeight(30)
-        tb_layout.addWidget(divider_left)
-        
-        # --- CENTER ZONE (40%): Workflow Controls ---
-        center_zone = QWidget()
-        workflow_layout = QHBoxLayout(center_zone)
-        workflow_layout.setContentsMargins(0, 0, 0, 0)
-        workflow_layout.setSpacing(15)
-        
-        # Video Checkbox (styled by global QSS)
+
+        tb_layout.addWidget(left_zone, stretch=2)
+
+        # --- CENTER: SearchBar ---
+        self.command_search = SearchBar(placeholder="Search files or semantic query...", shortcut_key="Ctrl+K")
+        self.command_search.search_submitted.connect(self._on_command_search)
+        tb_layout.addWidget(self.command_search, stretch=3)
+
+        # --- RIGHT: Workflow controls ---
+        right_zone = QWidget()
+        right_layout = QHBoxLayout(right_zone)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+
         self.checkbox_video = QCheckBox("Video")
-        workflow_layout.addWidget(self.checkbox_video)
+        right_layout.addWidget(self.checkbox_video)
 
-        # Audio Checkbox (styled by global QSS)
         self.checkbox_audio = QCheckBox("Audio")
-        workflow_layout.addWidget(self.checkbox_audio)
+        right_layout.addWidget(self.checkbox_audio)
 
-        # Translate Checkbox (styled by global QSS)
         self.checkbox_translate = QCheckBox("Translate")
         self.checkbox_translate.setToolTip("Translate transcripts to English (requires existing transcript)")
-        workflow_layout.addWidget(self.checkbox_translate)
-        
+        right_layout.addWidget(self.checkbox_translate)
+
         # Divider
-        divider1 = QFrame()
-        divider1.setFrameShape(QFrame.Shape.VLine)
-        divider1.setStyleSheet(f"background: {COLORS['border']}; max-width: 1px;")
-        divider1.setFixedHeight(30)
-        workflow_layout.addWidget(divider1)
-        
-        # Speed/Accuracy Toggle
-        mode_group = QButtonGroup()
-        self.radio_speed = QRadioButton("⚡ Speed")
-        self.radio_accuracy = QRadioButton("🎯 Accuracy")
-        self.radio_speed.setChecked(True)  # Default to speed
-        mode_group.addButton(self.radio_speed)
-        mode_group.addButton(self.radio_accuracy)
-        
-        # Radio buttons styled by global QSS
-        workflow_layout.addWidget(self.radio_speed)
-        workflow_layout.addWidget(self.radio_accuracy)
-        
+        div1 = QFrame()
+        div1.setFrameShape(QFrame.Shape.VLine)
+        div1.setStyleSheet(f"background: {COLORS['border']}; max-width: 1px;")
+        div1.setFixedHeight(26)
+        right_layout.addWidget(div1)
+
+        # Speed/Accuracy toggle — AnimatedToggle + label
+        self._mode_toggle = AnimatedToggle()
+        self._mode_toggle.setToolTip("Speed (off) / Accuracy (on)")
+        right_layout.addWidget(self._mode_toggle)
+
+        mode_lbl = QLabel("Accuracy")
+        mode_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: 600;")
+        right_layout.addWidget(mode_lbl)
+
+        # Preserve radio_speed / radio_accuracy as property aliases
+        self.radio_speed = QRadioButton("Speed")
+        self.radio_accuracy = QRadioButton("Accuracy")
+        self.radio_speed.setChecked(True)
+        self.radio_speed.hide()
+        self.radio_accuracy.hide()
+
+        # Sync toggle ↔ hidden radios
+        def _sync_mode_toggle(state):
+            if state:
+                self.radio_accuracy.setChecked(True)
+                mode_lbl.setText("Accuracy")
+                mode_lbl.setStyleSheet(f"color: {COLORS['accent']}; font-size: 10px; font-weight: 600;")
+            else:
+                self.radio_speed.setChecked(True)
+                mode_lbl.setText("Speed")
+                mode_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: 600;")
+        self._mode_toggle.stateChanged.connect(_sync_mode_toggle)
+
         # Divider
-        divider2 = QFrame()
-        divider2.setFrameShape(QFrame.Shape.VLine)
-        divider2.setStyleSheet(f"background: {COLORS['border']}; max-width: 1px;")
-        divider2.setFixedHeight(30)
-        workflow_layout.addWidget(divider2)
-        
-        # Start Indexing Button
-        self.btn_start_indexing = QPushButton("▶ START INDEXING")
+        div2 = QFrame()
+        div2.setFrameShape(QFrame.Shape.VLine)
+        div2.setStyleSheet(f"background: {COLORS['border']}; max-width: 1px;")
+        div2.setFixedHeight(26)
+        right_layout.addWidget(div2)
+
+        self.btn_start_indexing = QPushButton("\u25b6 START INDEXING")
         self.btn_start_indexing.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start_indexing.clicked.connect(self.start_indexing_from_checkboxes)
         self.btn_start_indexing.setToolTip("Start processing selected operations")
         self.btn_start_indexing.setStyleSheet(self._success_btn_style())
-        workflow_layout.addWidget(self.btn_start_indexing)
+        right_layout.addWidget(self.btn_start_indexing)
 
-        # START WORKFLOW Button (Primary CTA - Visible when queue has items)
-        self.btn_start_workflow_top = QPushButton("▶ START WORKFLOW")
+        self.btn_start_workflow_top = QPushButton("\u25b6 START WORKFLOW")
         self.btn_start_workflow_top.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_start_workflow_top.clicked.connect(self.start_workflow)
         self.btn_start_workflow_top.setToolTip("Start processing queued operations")
-        self.btn_start_workflow_top.hide()  # Hidden by default, shown when queue has items
+        self.btn_start_workflow_top.hide()
         self.btn_start_workflow_top.setStyleSheet(self._success_btn_style())
-        workflow_layout.addWidget(self.btn_start_workflow_top)
-        
-        # Workflow Status Badge (shows queue count)
+        right_layout.addWidget(self.btn_start_workflow_top)
+
         self.workflow_badge = QLabel("")
         self.workflow_badge.setStyleSheet(f"""
             QLabel {{
                 background: {COLORS['accent']};
                 color: {COLORS['text_on_accent']};
-                padding: 4px 10px;
-                border-radius: 12px;
+                padding: 3px 8px;
+                border-radius: 10px;
                 font-size: 10px;
                 font-weight: bold;
-                min-width: 20px;
+                min-width: 16px;
             }}
         """)
         self.workflow_badge.hide()
-        workflow_layout.addWidget(self.workflow_badge)
-        
-        tb_layout.addWidget(center_zone, stretch=4)
-        
-        # Divider
-        divider_right = QFrame()
-        divider_right.setFrameShape(QFrame.Shape.VLine)
-        divider_right.setStyleSheet(f"background: {COLORS['border']}; max-width: 1px;")
-        divider_right.setFixedHeight(30)
-        tb_layout.addWidget(divider_right)
-        
-        # --- RIGHT ZONE (30%): User Actions ---
-        right_zone = QWidget()
-        right_layout = QHBoxLayout(right_zone)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(10)
-        
-        # Activity Log Toggle Button
-        self.btn_activity_log = QPushButton("📋 LOG")
+        right_layout.addWidget(self.workflow_badge)
+
+        self.btn_activity_log = QPushButton("\U0001f4cb LOG")
         self.btn_activity_log.setCheckable(True)
         self.btn_activity_log.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_activity_log.toggled.connect(self.toggle_activity_log)
@@ -381,7 +408,7 @@ class MainWindow(QMainWindow):
                 background: transparent;
                 border: 1px solid {COLORS['border']};
                 color: {COLORS['text_dim']};
-                padding: 6px 12px;
+                padding: 5px 10px;
                 font-size: 11px;
                 font-weight: bold;
                 border-radius: 4px;
@@ -397,52 +424,76 @@ class MainWindow(QMainWindow):
             }}
         """)
         right_layout.addWidget(self.btn_activity_log)
-        
-        # Cancel Button (shown during workflow)
-        self.btn_cancel = QPushButton("✕ CANCEL")
+
+        self.btn_cancel = QPushButton("\u2715 CANCEL")
         self.btn_cancel.clicked.connect(self.cancel_workflow_handler)
         self.btn_cancel.hide()
         self.btn_cancel.setStyleSheet(self._error_btn_style())
         right_layout.addWidget(self.btn_cancel)
-        
-        right_layout.addStretch()
-        
-        tb_layout.addWidget(right_zone, stretch=3)
-        
+
+        tb_layout.addWidget(right_zone, stretch=5)
+
         ca_layout.addWidget(self.top_bar)
-        
+
         # Workflow Queue Panel (initially hidden)
         self.workflow_panel = self.create_workflow_panel()
         ca_layout.addWidget(self.workflow_panel)
 
         # B. Stacked Pages
         self.pages = QStackedWidget()
-        
+
         self.media_page = QWidget()
         self.setup_media_page()
         self.pages.addWidget(self.media_page)
-        
+
         self.search_tab = SearchTab()
         self.pages.addWidget(self.search_tab)
-        
+
+        # Faces placeholder page
+        self.faces_page = QWidget()
+        faces_layout = QVBoxLayout(self.faces_page)
+        faces_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        faces_icon = QLabel("\U0001f464")
+        faces_icon.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 48px; background: transparent;")
+        faces_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        faces_layout.addWidget(faces_icon)
+        faces_lbl = QLabel("Faces (Coming Soon)")
+        faces_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 16px; font-weight: 600; background: transparent;")
+        faces_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        faces_layout.addWidget(faces_lbl)
+        self.pages.addWidget(self.faces_page)
+
+        # Tags placeholder page
+        self.tags_page = QWidget()
+        tags_layout = QVBoxLayout(self.tags_page)
+        tags_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tags_icon = QLabel("\U0001f3f7\ufe0f")
+        tags_icon.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 48px; background: transparent;")
+        tags_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tags_layout.addWidget(tags_icon)
+        tags_lbl = QLabel("Tags (Coming Soon)")
+        tags_lbl.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 16px; font-weight: 600; background: transparent;")
+        tags_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tags_layout.addWidget(tags_lbl)
+        self.pages.addWidget(self.tags_page)
+
         ca_layout.addWidget(self.pages)
-        
-        # C. Status Bar (Improved)
+
+        # C. Enhanced Status Bar (32px)
         self.status_bar = QWidget()
         self.status_bar.setFixedHeight(32)
         self.status_bar.setStyleSheet(f"""
             background: {COLORS['bg_panel']};
             border-top: 1px solid {COLORS['border']};
-        """) 
+        """)
         stat_layout = QHBoxLayout(self.status_bar)
-        stat_layout.setContentsMargins(20, 6, 20, 6)
-        stat_layout.setSpacing(12)
-        
-        # Status icon
-        self.status_icon = QLabel("●")
+        stat_layout.setContentsMargins(16, 4, 16, 4)
+        stat_layout.setSpacing(10)
+
+        self.status_icon = QLabel("\u25cf")
         self.status_icon.setStyleSheet(f"color: {COLORS['success']}; font-size: 10px;")
         stat_layout.addWidget(self.status_icon)
-        
+
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet(f"""
             color: {COLORS['text_main']};
@@ -450,10 +501,31 @@ class MainWindow(QMainWindow):
             font-size: 12px;
         """)
         stat_layout.addWidget(self.status_label)
-        
+
         stat_layout.addStretch()
-        
-        # Progress bar (more prominent)
+
+        # GPU indicator
+        self.gpu_indicator = StatusIndicator("", COLORS['success'])
+        self._init_gpu_indicator()
+        stat_layout.addWidget(self.gpu_indicator)
+
+        # Separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet(f"background: {COLORS['border']}; max-width: 1px;")
+        sep.setFixedHeight(16)
+        stat_layout.addWidget(sep)
+
+        # RAM indicator
+        self.ram_indicator = StatusIndicator("", COLORS['accent'])
+        stat_layout.addWidget(self.ram_indicator)
+        self._update_ram_indicator()
+
+        self.ram_timer = QTimer(self)
+        self.ram_timer.timeout.connect(self._update_ram_indicator)
+        self.ram_timer.start(30000)  # every 30s
+
+        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(16)
         self.progress_bar.setFixedWidth(200)
@@ -474,25 +546,205 @@ class MainWindow(QMainWindow):
         self.progress_bar.setTextVisible(True)
         self.progress_bar.hide()
         stat_layout.addWidget(self.progress_bar)
-        
+
         ca_layout.addWidget(self.status_bar)
-        
+
         # Activity Log Panel (initially collapsed)
         self.activity_log = ActivityLog()
-        self.activity_log.hide()  # Hidden by default
+        self.activity_log.hide()
         ca_layout.addWidget(self.activity_log)
-        
+
         # Toast Notification Manager
         self.toast_manager = ToastManager(self)
 
         main_layout.addWidget(content_area)
-        
+
         self.btn_nav_media.setChecked(True)
         self.pages.setCurrentIndex(0)
 
     def switch_tab(self, btn):
         id = self.nav_group.id(btn)
         self.pages.setCurrentIndex(id)
+
+    # ── Sidebar collapse / expand ────────────────────────────────
+    def toggle_sidebar(self):
+        """Toggle sidebar between collapsed (56px) and expanded (180px)."""
+        if self.sidebar_collapsed:
+            target = SIDEBAR_EXPANDED
+            self.sidebar_collapsed = False
+        else:
+            target = SIDEBAR_COLLAPSED
+            self.sidebar_collapsed = True
+
+        current_w = self.sidebar.maximumWidth()
+        self._sidebar_anim = slide_width(self.sidebar, current_w, target,
+                                          duration=ANIM_NORMAL,
+                                          callback=self._on_sidebar_anim_done)
+
+    def _on_sidebar_anim_done(self):
+        """Update nav button labels visibility after sidebar animation."""
+        collapsed = self.sidebar_collapsed
+        for btn in self._nav_buttons:
+            btn.text_label.setVisible(not collapsed)
+        self.version_label.setVisible(not collapsed)
+        self.sidebar_project_label.setVisible(not collapsed)
+
+    # ── Command bar search ───────────────────────────────────────
+    def _on_command_search(self, text):
+        """Handle search from the command bar SearchBar."""
+        if self.pages.currentIndex() == 0:
+            # Media page: quick-filter tree by filename
+            self.tree.filter_by_text(text) if hasattr(self.tree, 'filter_by_text') else None
+        else:
+            # Search page: delegate to search tab
+            if hasattr(self.search_tab, 'search_bar'):
+                self.search_tab.search_bar.setText(text)
+                self.search_tab.search_bar.setFocus()
+                if hasattr(self.search_tab, 'run_search'):
+                    self.search_tab.run_search(text)
+
+    # ── Grid / List view toggle ──────────────────────────────────
+    def _set_media_view(self, mode):
+        """Switch between 'list' and 'grid' view on the media page."""
+        if mode == self.media_view_mode:
+            return
+        self.media_view_mode = mode
+        if mode == "grid":
+            if not self._grid_populated:
+                self._populate_grid()
+            self._left_stack.setCurrentIndex(1)
+        else:
+            self._left_stack.setCurrentIndex(0)
+        self._update_view_toggle_style()
+
+    def _update_view_toggle_style(self):
+        """Highlight the active view toggle button."""
+        active_style = f"""
+            QPushButton {{
+                background: {COLORS['accent']};
+                color: {COLORS['text_on_accent']};
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+            }}
+        """
+        inactive_style = f"""
+            QPushButton {{
+                background: transparent;
+                color: {COLORS['text_dim']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                border-color: {COLORS['accent']};
+                color: {COLORS['accent']};
+            }}
+        """
+        if self.media_view_mode == "list":
+            self.btn_list_view.setStyleSheet(active_style)
+            self.btn_grid_view.setStyleSheet(inactive_style)
+        else:
+            self.btn_grid_view.setStyleSheet(active_style)
+            self.btn_list_view.setStyleSheet(inactive_style)
+
+    def _populate_grid(self):
+        """Build thumbnail cards from the tree's file list."""
+        # Clear existing cards
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        files = self.tree.get_all_file_paths()
+        thumb_dir = os.path.join(self.project_path, "_cyne_db", "thumbnails")
+
+        for fpath in files:
+            # Try to find thumbnail
+            basename = os.path.splitext(os.path.basename(fpath))[0]
+            thumb_path = os.path.join(thumb_dir, f"{basename}.jpg")
+            if not os.path.isfile(thumb_path):
+                thumb_path = None
+
+            # Build status badges
+            status_icons = []
+            try:
+                data = self.db.get_video_metadata(fpath)
+                if data.get("tags"):
+                    status_icons.append(("\U0001f4f7", COLORS['success']))  # indexed
+                if data.get("transcript"):
+                    status_icons.append(("\U0001f3a4", COLORS['success']))  # transcribed
+            except Exception:
+                pass
+
+            card = ThumbnailCard(fpath, thumbnail_path=thumb_path,
+                                  status_icons=status_icons if status_icons else None)
+            card.clicked.connect(self._on_grid_card_clicked)
+            card.double_clicked.connect(self.open_player_from_tree)
+            self.grid_layout.addWidget(card)
+
+        self._grid_populated = True
+
+    def _on_grid_card_clicked(self, video_path):
+        """Handle grid card click — select in tree and update preview."""
+        # Select the matching item in the tree
+        if hasattr(self.tree, 'select_file'):
+            self.tree.select_file(video_path)
+        self.update_preview_panel()
+
+    def refresh_grid(self):
+        """Force grid repopulation on next switch."""
+        self._grid_populated = False
+        if self.media_view_mode == "grid":
+            self._populate_grid()
+
+    # ── Detail panel slide-in / collapse ─────────────────────────
+    def _collapse_detail_panel(self):
+        """Slide the detail/preview panel to 0 width."""
+        sizes = self.media_splitter.sizes()
+        if len(sizes) >= 2 and sizes[1] > 0:
+            self._saved_splitter_sizes = list(sizes)
+            # Animate by moving splitter — set preview panel to minimum
+            self.media_splitter.setSizes([sizes[0] + sizes[1], 0])
+
+    def _expand_detail_panel(self):
+        """Restore the detail/preview panel to its previous width."""
+        if hasattr(self, '_saved_splitter_sizes'):
+            self.media_splitter.setSizes(self._saved_splitter_sizes)
+        else:
+            total = sum(self.media_splitter.sizes())
+            self.media_splitter.setSizes([int(total * 0.65), int(total * 0.35)])
+
+    # ── GPU / RAM status indicators ──────────────────────────────
+    def _init_gpu_indicator(self):
+        """Detect GPU and set the indicator."""
+        try:
+            import torch
+            if torch.cuda.is_available():
+                name = torch.cuda.get_device_name(0)
+                self.gpu_indicator.set_status(name, COLORS['success'])
+                self.gpu_indicator.set_active(True)
+            else:
+                self.gpu_indicator.set_status("CPU Only", COLORS['warning'])
+                self.gpu_indicator.set_active(False)
+        except Exception:
+            self.gpu_indicator.set_status("CPU Only", COLORS['warning'])
+            self.gpu_indicator.set_active(False)
+
+    def _update_ram_indicator(self):
+        """Update RAM usage in status bar."""
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            used_gb = mem.used / (1024 ** 3)
+            total_gb = mem.total / (1024 ** 3)
+            pct = mem.percent
+            color = COLORS['success'] if pct < 70 else (COLORS['warning'] if pct < 90 else COLORS['error'])
+            self.ram_indicator.set_status(f"RAM {used_gb:.1f}/{total_gb:.0f} GB", color)
+            self.ram_indicator.set_active(pct > 70)
+        except Exception:
+            self.ram_indicator.set_status("RAM N/A", COLORS['text_disabled'])
 
     def create_action_btn(self, text, func):
         btn = QPushButton(text)
@@ -1314,66 +1566,159 @@ class MainWindow(QMainWindow):
 
     def setup_media_page(self):
         layout = QVBoxLayout(self.media_page)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
+
         tbar = QHBoxLayout()
-        
+
         btn_add = QPushButton(" + ADD FILE ")
         btn_add.setProperty("class", "accent")
         btn_add.clicked.connect(self.add_files)
-        
+
         btn_folder = QPushButton(" + ADD FOLDER ")
         btn_folder.setStyleSheet(f"background: {COLORS['bg_input']}; color: white;")
         btn_folder.clicked.connect(self.add_folder)
-        
+
         tbar.addWidget(btn_add)
         tbar.addWidget(btn_folder)
-        
-        # Removed "All" and "None" buttons - now using checkbox in column header
+
         tbar.addStretch()
-        
+
+        # Grid / List toggle buttons
+        self.media_view_mode = "list"
+
+        self.btn_list_view = QPushButton("\u2630")  # list icon
+        self.btn_list_view.setFixedSize(30, 28)
+        self.btn_list_view.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_list_view.setToolTip("List view")
+        self.btn_list_view.clicked.connect(lambda: self._set_media_view("list"))
+        tbar.addWidget(self.btn_list_view)
+
+        self.btn_grid_view = QPushButton("\u25a6")  # grid icon
+        self.btn_grid_view.setFixedSize(30, 28)
+        self.btn_grid_view.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_grid_view.setToolTip("Grid view")
+        self.btn_grid_view.clicked.connect(lambda: self._set_media_view("grid"))
+        tbar.addWidget(self.btn_grid_view)
+
+        self._update_view_toggle_style()
+
         layout.addLayout(tbar)
-        
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(1)
-        splitter.setStyleSheet(f"QSplitter::handle {{ background: {COLORS['border']}; }}")
-        
+
+        # Splitter: left (tree or grid) | right (detail panel)
+        self.media_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.media_splitter.setHandleWidth(1)
+        self.media_splitter.setStyleSheet(f"QSplitter::handle {{ background: {COLORS['border']}; }}")
+
+        # --- Left side: tree (list mode) ---
         self.tree = MediaTree(project_path=self.project_path)
         self.tree.itemSelectionChanged.connect(self.update_preview_panel)
         self.tree.files_dropped_signal.connect(self.handle_dropped_files)
         self.tree.clear_data_signal.connect(self.handle_clear_data)
         self.tree.double_clicked_signal.connect(self.open_player_from_tree)
-        
-        splitter.addWidget(self.tree)
-        
+
+        # --- Left side: grid (grid mode) ---
+        self.grid_scroll = QScrollArea()
+        self.grid_scroll.setWidgetResizable(True)
+        self.grid_scroll.setStyleSheet(f"QScrollArea {{ border: none; background: {COLORS['bg_app']}; }}")
+        self.grid_container = QWidget()
+        self.grid_layout = FlowLayout(self.grid_container, margin=12, h_spacing=12, v_spacing=12)
+        self.grid_scroll.setWidget(self.grid_container)
+        self.grid_scroll.hide()  # hidden by default (list mode)
+        self._grid_populated = False
+
+        # Grid empty state
+        self.grid_empty_state = QWidget()
+        empty_layout = QVBoxLayout(self.grid_empty_state)
+        empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_icon = QLabel("\U0001f4c1")
+        empty_icon.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 48px; background: transparent;")
+        empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_icon)
+        empty_title = QLabel("Import media to get started")
+        empty_title.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 15px; font-weight: 600; background: transparent;")
+        empty_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_title)
+        empty_sub = QLabel("Drag files or use + Add File")
+        empty_sub.setStyleSheet(f"color: {COLORS['text_disabled']}; font-size: 12px; background: transparent;")
+        empty_sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(empty_sub)
+        self.grid_empty_state.hide()
+
+        # Container to hold tree and grid (swap visibility)
+        self._left_stack = QStackedWidget()
+        self._left_stack.addWidget(self.tree)        # index 0
+        self._left_stack.addWidget(self.grid_scroll)  # index 1
+        self._left_stack.setCurrentIndex(0)
+
+        self.media_splitter.addWidget(self._left_stack)
+
+        # --- Right side: detail / preview panel ---
         self.preview_panel = QWidget()
         self.preview_panel.setStyleSheet(f"background: {COLORS['bg_panel']}; border-left: 1px solid {COLORS['border']};")
+        self._detail_anim = None  # keep animation ref
+
         pp_layout = QVBoxLayout(self.preview_panel)
-        pp_layout.setContentsMargins(0,0,0,0)
-        
-        # Embedded player (replaces static thumbnail)
+        pp_layout.setContentsMargins(0, 0, 0, 0)
+        pp_layout.setSpacing(0)
+
+        # Detail header with close button
+        detail_header = QWidget()
+        detail_header.setFixedHeight(32)
+        detail_header.setStyleSheet(f"background: {COLORS['bg_panel']};")
+        dh_layout = QHBoxLayout(detail_header)
+        dh_layout.setContentsMargins(12, 4, 4, 4)
+        dh_layout.setSpacing(0)
+
+        dh_label = QLabel("Preview")
+        dh_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; font-weight: 600; background: transparent;")
+        dh_layout.addWidget(dh_label)
+        dh_layout.addStretch()
+
+        btn_close_detail = QPushButton("\u2715")
+        btn_close_detail.setFixedSize(24, 24)
+        btn_close_detail.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_close_detail.setToolTip("Close detail panel")
+        btn_close_detail.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                border: none;
+                color: {COLORS['text_dim']};
+                font-size: 14px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background: {COLORS['bg_input']};
+                color: {COLORS['error']};
+            }}
+        """)
+        btn_close_detail.clicked.connect(self._collapse_detail_panel)
+        dh_layout.addWidget(btn_close_detail)
+
+        pp_layout.addWidget(detail_header)
+
+        # Embedded player
         from gui.embedded_player import EmbeddedPlayerWidget
         self.embedded_player = EmbeddedPlayerWidget()
         self.embedded_player.setMinimumHeight(300)
         self.embedded_player.fullscreen_callback = self.open_player_from_tree
         pp_layout.addWidget(self.embedded_player)
-        
+
         # Keep preview_lbl for fallback
         self.preview_lbl = QLabel()
         self.preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_lbl.setStyleSheet(f"background: {COLORS['bg_app']};")
         self.preview_lbl.setMinimumHeight(250)
-        self.preview_lbl.hide()  # Hidden by default, use embedded player
-        
+        self.preview_lbl.hide()
+
         self.meta_panel = MetadataPanel()
         self.meta_panel.save_requested.connect(self.save_metadata_handler)
         pp_layout.addWidget(self.meta_panel)
-        
-        splitter.addWidget(self.preview_panel)
-        splitter.setSizes([900, 400])
-        
-        layout.addWidget(splitter)
+
+        self.media_splitter.addWidget(self.preview_panel)
+        self.media_splitter.setSizes([900, 400])
+
+        layout.addWidget(self.media_splitter)
 
     def create_menu_bar(self):
         menubar = self.menuBar()
@@ -1774,10 +2119,13 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         # 1. STOP WORKERS
+        if self.file_watcher and self.file_watcher.isRunning():
+            self.file_watcher.stop()
+            self.file_watcher.wait(3000)
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait()
-            
+
         # 2. UNLOAD AI
         AIBackend().unload_models()
         
@@ -1871,7 +2219,28 @@ class MainWindow(QMainWindow):
         status = self.background_indexer.get_queue_status()
         if status['queue_size'] == 0:
             self.status_label.setText("Background indexing complete")
-    
+
+    # --- FILE WATCHER HANDLERS ---
+
+    def _on_watched_new_file(self, video_path):
+        """A new video file appeared in the project directory."""
+        logger.info(f"File watcher: new file detected — {video_path}")
+        self.tree.add_files_flat([video_path])
+        self.search_tab.engine.build_index([video_path])
+        self.mark_dirty()
+        self.background_indexer.add_file(video_path, priority=2)
+        if not self.background_indexer.background_timer.isActive():
+            self.background_indexer.start_background_indexing()
+        self.activity_log.log_info(f"New file detected: {os.path.basename(video_path)}")
+
+    def _on_watched_file_modified(self, video_path):
+        """An existing video file was modified in the project directory."""
+        logger.info(f"File watcher: file modified — {video_path}")
+        self.background_indexer.add_file(video_path, priority=1, force=True)
+        if not self.background_indexer.background_timer.isActive():
+            self.background_indexer.start_background_indexing()
+        self.activity_log.log_info(f"File modified, re-indexing: {os.path.basename(video_path)}")
+
     def update_log_status(self, msg):
         self.status_label.setText(msg)
         # Update status icon based on message

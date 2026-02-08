@@ -212,11 +212,12 @@ class TranscribeTranslateWorker(QThread):
             if self.mode == "accuracy":
                 model = ai.load_whisper()
             else:
+                model_name, whisper_device, compute_type = ai.get_whisper_params("speed")
                 from faster_whisper import WhisperModel
                 try:
-                    model = WhisperModel("medium", device="cuda", compute_type="float16")
-                except:
-                    model = WhisperModel("large-v3", device="cuda", compute_type="int8")
+                    model = WhisperModel(model_name, device=whisper_device, compute_type=compute_type)
+                except Exception:
+                    model = WhisperModel("large-v3", device=whisper_device, compute_type=compute_type)
             
             self.log_signal.emit("Transcribing audio in original language...")
             # Don't use task="translate" here - we want the original language
@@ -449,11 +450,12 @@ class TranscribeTranslateWorker(QThread):
                 if self.mode == "accuracy":
                     model = ai.load_whisper()
                 else:
+                    model_name, whisper_device, compute_type = ai.get_whisper_params("speed")
                     from faster_whisper import WhisperModel
                     try:
-                        model = WhisperModel("medium", device="cuda", compute_type="float16")
-                    except:
-                        model = WhisperModel("large-v3", device="cuda", compute_type="int8")
+                        model = WhisperModel(model_name, device=whisper_device, compute_type=compute_type)
+                    except Exception:
+                        model = WhisperModel("large-v3", device=whisper_device, compute_type=compute_type)
             else:
                 model = ai.whisper_model
             

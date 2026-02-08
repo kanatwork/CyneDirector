@@ -42,6 +42,8 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 | `logger.py` | Centralized logging (console + file handlers) |
 | `srt_exporter.py` | SRT subtitle file export |
 | `background_indexer.py` | Incremental background file indexing |
+| `model_manager.py` | Model registry, HF/YOLO cache detection, `ModelDownloadWorker(QThread)` for pre-downloading AI models |
+| `proxy_generator.py` | FFmpeg-based 720p proxy video generation, 320x180 thumbnail extraction, `check_ffmpeg_available()` helper |
 
 ### gui/ — Presentation Layer (PyQt6)
 Dark theme UI with Indigo accent (`#6366f1`). All heavy work delegated to workers.
@@ -61,6 +63,7 @@ Dark theme UI with Indigo accent (`#6366f1`). All heavy work delegated to worker
 | `tag_chip_widget.py` | Tag chip display component |
 | `toast_notification.py` | Toast notification popups |
 | `shortcuts_panel.py` | Keyboard shortcuts reference |
+| `model_download_dialog.py` | Pre-download dialog for AI models — shows cache status, progress bars, skip/download |
 
 ### workers/ — Background Processing (QThread)
 Emit PyQt signals for progress/results. Support pause/resume/cancel.
@@ -71,6 +74,7 @@ Emit PyQt signals for progress/results. Support pause/resume/cancel.
 | `transcriber.py` | Audio transcription via Whisper |
 | `transcribe_translate_worker.py` | Combined transcription + translation pipeline |
 | `importer.py` | Folder import scanner |
+| `file_watcher.py` | Watchdog-based project directory monitor — emits `new_file_signal`/`file_modified_signal` with 2s debounce |
 
 ### Data Flow
 ```
@@ -107,8 +111,9 @@ project_dir/
 | `python-dotenv` | >=1.0.0 | Load `.env` file for API keys and config |
 | `numpy` | <2.0.0 | Numerical operations |
 | `deepl` | >=1.0.0 | Translation API (optional) |
+| `watchdog` | >=3.0.0 | Filesystem monitoring for auto-detecting new/modified videos |
 
-**External:** FFprobe (for robust video metadata extraction)
+**External:** FFprobe / FFmpeg (for video metadata extraction, proxy generation, and thumbnails)
 
 ### Environment Variables
 

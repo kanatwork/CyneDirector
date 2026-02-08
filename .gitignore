@@ -31,9 +31,16 @@ ENV/
 .vscode/
 .idea/
 .cursor/
+.claude/
 *.swp
 *.swo
 *~
+
+# Windows reserved device names (accidental creates)
+nul
+nul.txt
+con
+con.txt
 
 # Logs (keep directory via .gitkeep)
 logs/*

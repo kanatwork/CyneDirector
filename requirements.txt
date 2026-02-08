@@ -15,5 +15,6 @@ accelerate>=0.20.0
 psutil>=5.9.0
 ultralytics>=8.0.0
 python-dotenv>=1.0.0
+watchdog>=3.0.0
 # Optional: DeepL API for high-quality translation (install with: pip install deepl)
 # deepl>=1.0.0

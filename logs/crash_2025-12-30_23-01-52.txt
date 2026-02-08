@@ -1,7 +1,0 @@
-CYNEDIRECTOR V2.1.0 CRASH REPORT
-==============================
-Traceback (most recent call last):
-  File "C:\Users\kanis\OneDrive\Desktop\Tools\CyneDirector_v20\workers\indexer.py", line 117, in run
-    filename = os.path.basename(video_path)
-               ^^
-UnboundLocalError: cannot access local variable 'os' where it is not associated with a value

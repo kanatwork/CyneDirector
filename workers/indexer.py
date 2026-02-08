@@ -12,6 +12,7 @@ from core.database import Database
 from core.tags import get_tag_bank
 from core.logger import get_logger
 from core.performance import get_optimal_batch_size, log_memory_usage
+from core.proxy_generator import generate_thumbnail, generate_proxy, check_ffmpeg_available
 from collections import defaultdict
 
 logger = get_logger(__name__)
@@ -976,7 +977,22 @@ class IndexerWorker(QThread):
                 db.update_metadata_key(video_path, "objects", detected_objects)
             if yolo_detections:
                 db.update_metadata_key(video_path, "objects_yolo", yolo_detections)
-            
+
+            # --- PHASE 6: THUMBNAIL & PROXY GENERATION ---
+            thumb_dir = os.path.join(self.project_path, "_cyne_db", "thumbnails")
+            thumb_path = generate_thumbnail(video_path, thumb_dir)
+            if thumb_path:
+                db.update_metadata_key(video_path, "thumbnail_path", thumb_path)
+                self.log_signal.emit(f"  → Thumbnail saved")
+
+            from config import GENERATE_PROXIES
+            if GENERATE_PROXIES:
+                proxy_dir = os.path.join(self.project_path, "_cyne_db", "proxies")
+                proxy_path = generate_proxy(video_path, proxy_dir)
+                if proxy_path:
+                    db.update_metadata_key(video_path, "proxy_path", proxy_path)
+                    self.log_signal.emit(f"  → Proxy generated")
+
             # Update last_scanned timestamp for incremental indexing
             try:
                 file_mtime = os.path.getmtime(video_path)

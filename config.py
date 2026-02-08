@@ -36,6 +36,11 @@ THUMBNAIL_SIZE = (320, 180)
 # instead of the default Salesforce/blip-image-captioning-large (444M params, ~1GB VRAM).
 USE_BLIP2 = False
 
+# Proxy Generation
+# Thumbnails are always generated during indexing (fast, single-frame JPEG).
+# Set GENERATE_PROXIES=True to also create 720p H.264 proxy videos (slower).
+GENERATE_PROXIES = False
+
 # Translation Config
 # To use DeepL translation, set DEEPL_API_KEY in a .env file at the project root
 # or as a system environment variable. Get a free key at: https://www.deepl.com/pro-api

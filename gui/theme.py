@@ -28,6 +28,15 @@ ERROR_HOVER      = "#dc2626"
 SHADOW           = "rgba(0, 0, 0, 0.3)"
 GLOW             = "rgba(99, 102, 241, 0.2)"
 
+# ─── Animation Durations (ms) ──────────────────────────────────────
+ANIM_FAST   = 150
+ANIM_NORMAL = 250
+ANIM_SLOW   = 350
+
+# ─── Sidebar Dimensions ────────────────────────────────────────────
+SIDEBAR_EXPANDED  = 180   # full width with text labels
+SIDEBAR_COLLAPSED = 56    # icon-only width
+
 # ─── Backward-Compatible COLORS Dict ────────────────────────────
 # Every GUI file does `from config import COLORS` and accesses keys
 # like COLORS['bg_app'], COLORS['accent'], etc.  This dict maps
@@ -88,6 +97,8 @@ COLORS = {
 
     # surface variants (new convenience keys used in main_window)
     "surface_hover": SURFACE_HOVER,
+    "surface_alt":   "#222222",
+    "overlay":       "rgba(0, 0, 0, 0.5)",
 }
 
 # ─── Font Definitions ────────────────────────────────────────────

@@ -32,21 +32,19 @@ class TranscriberWorker(QThread):
         try:
             if self.mode == "accuracy":
                 self.log_signal.emit("Loading Whisper Large-v3 model (this may take a moment)...")
-                # Loads Faster-Whisper (Large-v3) with FP16 optimization for best quality
                 model = ai.load_whisper()
                 self.log_signal.emit("Whisper model loaded successfully")
             else:  # speed mode
-                self.log_signal.emit("Loading Whisper Medium model for faster processing...")
-                # Use medium model for speed, or use int8 compute type
+                model_name, whisper_device, compute_type = ai.get_whisper_params("speed")
+                self.log_signal.emit(f"Loading Whisper {model_name} [{whisper_device}] for faster processing...")
                 from faster_whisper import WhisperModel
                 try:
-                    # Try medium model first (faster than large-v3)
-                    model = WhisperModel("medium", device="cuda", compute_type="float16")
-                    self.log_signal.emit("Whisper Medium model loaded successfully")
-                except:
-                    # Fallback to large-v3 with int8 for speed
-                    model = WhisperModel("large-v3", device="cuda", compute_type="int8")
-                    self.log_signal.emit("Whisper Large-v3 (int8) loaded for speed")
+                    model = WhisperModel(model_name, device=whisper_device, compute_type=compute_type)
+                    self.log_signal.emit(f"Whisper {model_name} model loaded successfully")
+                except Exception:
+                    # Fallback to large-v3 with same device settings
+                    model = WhisperModel("large-v3", device=whisper_device, compute_type=compute_type)
+                    self.log_signal.emit(f"Whisper Large-v3 ({compute_type}) loaded for speed")
         except Exception as e:
             self.log_signal.emit(f"CRITICAL: Audio Model Failed - {e}")
             self.finished_signal.emit()

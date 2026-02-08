@@ -115,7 +115,17 @@ def main():
         from core.project_manager import ProjectManager
         pm = ProjectManager()
         pm.add_recent_project(project_path, project_name)
-        
+
+        # Check for missing AI models and offer pre-download
+        from core.model_manager import get_missing_required_models
+        missing_models = get_missing_required_models()
+        if missing_models:
+            from gui.model_download_dialog import ModelDownloadDialog
+            dl_dialog = ModelDownloadDialog()
+            if icon_path.exists():
+                dl_dialog.setWindowIcon(QIcon(str(icon_path)))
+            dl_dialog.exec()
+
         # IMPORT MAIN WINDOW NOW (Lazy Loading)
         # This keeps the startup dialog instant, and loads PyTorch/CV2 only after project selection.
         try:

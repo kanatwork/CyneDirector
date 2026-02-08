@@ -24,21 +24,31 @@ def get_available_memory_mb():
     except:
         return 4096  # Default to 4GB if we can't detect
 
-def get_optimal_batch_size(base_batch_size=32, min_batch=8, max_batch=128):
+def get_optimal_batch_size(base_batch_size=32, min_batch=8, max_batch=128, device="cuda"):
     """
-    Calculate optimal batch size based on available memory.
-    
+    Calculate optimal batch size based on available memory and compute device.
+
     Args:
-        base_batch_size: Default batch size
+        base_batch_size: Default batch size (tuned for CUDA)
         min_batch: Minimum batch size
         max_batch: Maximum batch size
-    
+        device: Compute device — "cuda", "mps", or "cpu"
+
     Returns:
         Optimal batch size
     """
     try:
         available_mb = get_available_memory_mb()
-        
+
+        # Scale base values down for non-CUDA devices before applying RAM heuristic.
+        # MPS shares system RAM with the GPU so use half; CPU is memory-bound so use quarter.
+        if device == "mps":
+            base_batch_size = max(min_batch, base_batch_size // 2)
+            max_batch = max(min_batch, max_batch // 2)
+        elif device == "cpu":
+            base_batch_size = max(min_batch, base_batch_size // 4)
+            max_batch = max(min_batch, max_batch // 4)
+
         # Adjust batch size based on available memory
         if available_mb > 16000:  # > 16GB RAM
             optimal = min(max_batch, base_batch_size * 2)
@@ -48,8 +58,8 @@ def get_optimal_batch_size(base_batch_size=32, min_batch=8, max_batch=128):
             optimal = max(min_batch, int(base_batch_size * 0.75))
         else:  # < 4GB RAM
             optimal = min_batch
-        
-        logger.debug(f"Optimal batch size: {optimal} (available RAM: {available_mb:.0f}MB)")
+
+        logger.debug(f"Optimal batch size: {optimal} (device={device}, available RAM: {available_mb:.0f}MB)")
         return optimal
     except Exception as e:
         logger.warning(f"Could not determine optimal batch size: {e}, using default")
