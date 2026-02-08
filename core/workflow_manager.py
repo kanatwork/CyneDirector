@@ -255,14 +255,6 @@ class WorkflowManager(QObject):
         low_ops = [op for op in self.queue if op.priority == "low"]
         self.queue = high_ops + normal_ops + low_ops
     
-    def reorder_operation(self, old_index: int, new_index: int) -> bool:
-        """Reorder an operation in the queue (for drag-drop)."""
-        if 0 <= old_index < len(self.queue) and 0 <= new_index < len(self.queue):
-            op = self.queue.pop(old_index)
-            self.queue.insert(new_index, op)
-            return True
-        return False
-    
     def start_workflow(self):
         """Start processing the workflow queue."""
         if self.is_running:

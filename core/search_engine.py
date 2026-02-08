@@ -521,11 +521,7 @@ class SearchEngine:
         Returns parsed query structure.
         """
         import re
-        
-        # Check for field-specific searches
-        field_pattern = r'(\w+):(["\']?)([^"\']+)\2'
-        field_matches = re.findall(field_pattern, query)
-        
+
         parsed = {
             'original': query,
             'fields': {},
@@ -535,19 +531,14 @@ class SearchEngine:
             'score_range': None,
             'duration_range': None
         }
-        
+
         # Extract phrases (quoted strings)
         phrase_pattern = r'"([^"]+)"'
         phrases = re.findall(phrase_pattern, query)
         parsed['phrases'] = phrases
         query_no_phrases = re.sub(phrase_pattern, '', query)
-        
-        # Extract field-specific searches
-        for field, quote, value in field_matches:
-            parsed['fields'][field.lower()] = value.strip()
-            query_no_phrases = re.sub(f'{re.escape(field)}:{re.escape(quote)}{re.escape(value)}{re.escape(quote)}', '', query_no_phrases, count=1)
-        
-        # Extract score range (score:>80, score:50-90)
+
+        # Extract score range BEFORE generic fields (score:>80, score:50-90)
         score_pattern = r'score:([><=]?)(\d+)(?:-(\d+))?'
         score_match = re.search(score_pattern, query_no_phrases)
         if score_match:
@@ -561,8 +552,8 @@ class SearchEngine:
             else:
                 parsed['score_range'] = (float(val1), float(val1))
             query_no_phrases = re.sub(score_pattern, '', query_no_phrases)
-        
-        # Extract duration range (duration:30-60)
+
+        # Extract duration range BEFORE generic fields (duration:30-60)
         duration_pattern = r'duration:(\d+)(?:-(\d+))?'
         duration_match = re.search(duration_pattern, query_no_phrases)
         if duration_match:
@@ -572,6 +563,16 @@ class SearchEngine:
             else:
                 parsed['duration_range'] = (0.0, float(val1))
             query_no_phrases = re.sub(duration_pattern, '', query_no_phrases)
+
+        # Extract field-specific searches (unquoted values stop at whitespace)
+        field_pattern = r'(\w+):(["\']?)([^"\'\s]+)\2'
+        field_matches = re.findall(field_pattern, query_no_phrases)
+        for field, quote, value in field_matches:
+            parsed['fields'][field.lower()] = value.strip()
+            query_no_phrases = re.sub(
+                f'{re.escape(field)}:{re.escape(quote)}{re.escape(value)}{re.escape(quote)}',
+                '', query_no_phrases, count=1
+            )
         
         # Extract boolean operators and terms
         query_clean = query_no_phrases.strip()
@@ -876,7 +877,7 @@ class SearchEngine:
         Search for temporal sequences where action A precedes action B within max_gap_seconds.
         """
         if not query_vector or not self.db.temporal_sequences:
-            return []
+            return {}
         
         try:
             # Search for sequences matching action A
@@ -924,8 +925,11 @@ class SearchEngine:
                         pass
         except:
             pass
-        
-        return sequence_results
+
+        results_by_type = defaultdict(list)
+        for r in sequence_results:
+            results_by_type[r.get("match_type", "TEMPORAL SEQUENCE")].append(r)
+        return dict(results_by_type)
 
     def _search_temporal_proximity(self, query_vector, concept_a, concept_b, max_proximity_seconds=10):
         """

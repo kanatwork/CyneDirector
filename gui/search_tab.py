@@ -433,7 +433,7 @@ class SearchTab(QWidget):
 
         # Sort dropdown
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Score (High)", "Score (Low)", "Duration", "Date Added", "Filename"])
+        self.sort_combo.addItems(["Score (High)", "Score (Low)", "Filename"])
         self.sort_combo.setFixedWidth(150)
         self.sort_combo.setStyleSheet(f"""
             QComboBox {{
@@ -803,9 +803,12 @@ class SearchTab(QWidget):
             ("FILENAME", "FILENAME"),
             ("EMOTION", "EMOTION"),
             ("OBJECT", "OBJECT"),
+            ("OBJECT (YOLO)", "OBJECT (YOLO)"),
             ("SHOT_TYPE", "SHOT_TYPE"),
             ("TAG", "TAG"),
-            ("DESCRIPTION", "DESCRIPTION")
+            ("DESCRIPTION", "DESCRIPTION"),
+            ("CAST", "CAST"),
+            ("TEMPORAL SEQUENCE", "TEMPORAL SEQUENCE"),
         ]
 
         for key, label in match_types:
@@ -967,7 +970,11 @@ class SearchTab(QWidget):
         for result in self.current_results:
             # Match type filter
             if self.filter_state['match_types']:
-                if result.get('match_type', '') not in self.filter_state['match_types']:
+                match_type = result.get('match_type', '')
+                # For MULTI-MODAL results, check if any constituent type is selected
+                match_types_list = result.get('match_types', [match_type])
+                if not (match_type in self.filter_state['match_types'] or
+                        any(mt in self.filter_state['match_types'] for mt in match_types_list)):
                     continue
 
             # Score filter
@@ -1009,7 +1016,7 @@ class SearchTab(QWidget):
             sorted_results.sort(key=lambda x: x.get('score', 0), reverse=True)
         elif sort_mode == 1:  # Score Low
             sorted_results.sort(key=lambda x: x.get('score', 0))
-        elif sort_mode == 4:  # Filename
+        elif sort_mode == 2:  # Filename
             sorted_results.sort(key=lambda x: os.path.basename(x.get('path', '')))
 
         # Apply filters to sorted results
