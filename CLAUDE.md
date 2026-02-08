@@ -143,20 +143,44 @@ Models are lazily loaded (only when needed) and managed by the `AIBackend` singl
 ## Testing
 
 ### Smoke Tests
-Run from the project root using the venv Python (required for torch/transformers):
+Run from the project root:
 
 ```
-venv\Scripts\python.exe -m tests.smoke_search
+python3 -m tests.smoke_search
 ```
 
-`tests/smoke_search.py` exercises `SearchEngine` internals without GPU or real project data:
+`tests/smoke_search.py` exercises `SearchEngine` internals without GPU or real project data.
+It now installs lightweight import stubs for optional heavy dependencies (`torch`, `numpy`,
+and selected `core.*` modules), so it can run in minimal environments.
+
+Coverage includes:
 - **Query operator parsing** — AND/OR/NOT boolean operators, `score:>80` / `score:<50` ranges, `duration:30-60`, `"phrase"` extraction, `field:value` searches
+- **Quoted field values** — validates `dialogue:"hello world"` and mixed operator + field queries
 - **Temporal query return shape** — verifies `_search_temporal_sequence` returns a `dict` (keyed by match type), not a list
+- **Temporal + search integration** — verifies temporal results integrate with `search()` paginated response shape
 - **Filter application** — score range, field-specific, and phrase filters via `_apply_query_filters`
 - **Paginated response shape** — `search()` returns `dict` with `results`, `total`, `page`, `total_pages`
 - **Query expansion & decomposition** — `_expand_query` produces capped variations; `_decompose_query` splits on prepositions
 
 Tests use `SearchEngine.__new__()` with fake DB/AI/FaceDB stubs to bypass `__init__` and avoid loading any models.
+
+### Phase 5.0 Audit (February 8, 2026)
+Audit scope:
+- `core/search_engine.py`
+- `gui/search_tab.py`
+- `core/workflow_manager.py`
+- `tests/smoke_search.py`
+
+Audit findings and outcomes:
+- Temporal return-shape path was validated end-to-end (`search()` now safely consumes temporal helper mapping output).
+- Filter/sort behavior in `search_tab.py` was validated for emitted match types and implemented sort options.
+- Workflow queue semantics were validated after removing duplicate `reorder_operation` definition.
+- Regression discovered and fixed: quoted field parsing (`dialogue:"hello world"`) was broken by parser ordering/field tokenization changes in `core/search_engine.py`.
+- Regression discovered and fixed: smoke script failed in non-ML environments due hard `torch` import path.
+
+Verification completed:
+- `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile core/search_engine.py gui/search_tab.py core/workflow_manager.py tests/smoke_search.py` → passed.
+- `python3 -m tests.smoke_search` → passed (`23` tests, `OK`).
 
 ## Known Issues
 
