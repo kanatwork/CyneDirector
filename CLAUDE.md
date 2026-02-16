@@ -7,7 +7,7 @@ CyneDirector is an AI-powered video management and semantic search desktop appli
 **Core capabilities:**
 - Semantic visual search using CLIP embeddings
 - Automatic speech transcription via Whisper
-- Scene description generation via BLIP-2
+- Scene description generation via BLIP-2 / BLIP-large
 - YOLOv8 object detection with bounding boxes
 - Translation of transcripts (DeepL or Whisper-based)
 - LLM-powered video summarization (Llama-3.2 / Phi-3 fallback)
@@ -18,7 +18,7 @@ CyneDirector is an AI-powered video management and semantic search desktop appli
 ## Architecture
 
 ```
-main.py                  Entry point (DLL load-order fix, crash handler) → ProjectDialog → MainWindow
+main.py                  Entry point (DLL load-order fix, crash handler) -> ProjectDialog -> MainWindow
 config.py                Global config, constants; re-exports COLORS/STYLESHEET from gui/theme.py; per-project settings helpers (get_setting/load_project_settings/save_settings)
 run.bat                  Windows launcher — invokes venv Python directly (avoids system Python conflicts)
 ```
@@ -28,7 +28,7 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 
 | Module | Purpose |
 |---|---|
-| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, YOLOv8, Whisper, LLM models. Auto-detects GPU compute capability at import time. `configure_from_settings()` applies device preference from per-project settings. `get_whisper_params()` respects `whisper_model` setting. `load_blip()` respects `blip_variant` setting. |
+| `ai_models.py` | AIBackend singleton — loads/manages CLIP, BLIP-2, YOLOv8, Whisper, LLM models. Auto-detects GPU compute capability at import time. `configure_from_settings()` applies device preference. `get_whisper_params()` respects `whisper_model` setting. `load_blip()` respects `blip_variant` setting. |
 | `database.py` | SQLite (metadata, WAL mode) + ChromaDB (vector embeddings). Connection-per-thread via `threading.local()` |
 | `search_engine.py` | Multi-modal semantic search with query expansion, decomposition, YOLO object matching, pagination, caching |
 | `tags.py` | Tag hierarchy and vocabulary for visual indexing |
@@ -47,12 +47,12 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 | `settings_manager.py` | Per-project settings persistence — JSON load/save in `_cyne_db/settings.json`, defaults merging, `SettingsManager` class |
 
 ### gui/ — Presentation Layer (PyQt6)
-Dark theme UI with Indigo accent (`#6366f1`). All heavy work delegated to workers.
+Dark theme UI with configurable accent color (default Indigo `#6366f1`). All heavy work delegated to workers.
 
 | Module | Purpose |
 |---|---|
-| `theme.py` | Centralized design system — color palette, fonts, spacing, `generate_stylesheet()` |
-| `main_window.py` | Main application window, layout, menu |
+| `theme.py` | Centralized design system — color palette, fonts, spacing, `generate_stylesheet()`, `set_accent_color()` for runtime accent changes |
+| `main_window.py` | Main application window, layout, menu, settings wiring |
 | `search_tab.py` | Search interface with pagination controls |
 | `media_tree.py` | Project file tree browser |
 | `metadata_panel.py` | Metadata display for selected media |
@@ -64,15 +64,25 @@ Dark theme UI with Indigo accent (`#6366f1`). All heavy work delegated to worker
 | `tag_chip_widget.py` | Tag chip display component |
 | `toast_notification.py` | Toast notification popups |
 | `shortcuts_panel.py` | Keyboard shortcuts reference |
+| `animations.py` | Reusable QPropertyAnimation helpers (fade, slide, pulse) with reduce-motion support |
 | `model_download_dialog.py` | Pre-download dialog for AI models — shows cache status, progress bars, skip/download |
-| `settings_dialog.py` | Settings panel — 750×550 modal with 5 category tabs (General, AI/Models, Indexing, Appearance, API Keys), AnimatedToggle, color picker |
+| `settings_dialog.py` | Settings panel — 750x550 modal with 5 category tabs (General, AI/Models, Indexing, Appearance, API Keys), AnimatedToggle, color picker |
+
+#### gui/widgets/ — Reusable Components
+
+| Module | Purpose |
+|---|---|
+| `animated_toggle.py` | iOS-style animated toggle switch for boolean settings |
+| `search_bar.py` | Unified search bar with icon, placeholder, Ctrl+K hint, glow effect |
+| `status_indicator.py` | Pulsing status dot + label for device/state info |
+| `thumbnail_card.py` | Grid-view card with thumbnail, filename, status badges, hover shadow |
 
 ### workers/ — Background Processing (QThread)
 Emit PyQt signals for progress/results. Support pause/resume/cancel.
 
 | Module | Purpose |
 |---|---|
-| `indexer.py` | Visual indexing — extracts frames, generates CLIP embeddings/tags, runs YOLOv8 object detection |
+| `indexer.py` | Visual indexing — extracts frames, generates CLIP embeddings/tags, runs YOLOv8 object detection, thumbnail/proxy generation |
 | `transcriber.py` | Audio transcription via Whisper |
 | `transcribe_translate_worker.py` | Combined transcription + translation pipeline |
 | `importer.py` | Folder import scanner |
@@ -80,22 +90,22 @@ Emit PyQt signals for progress/results. Support pause/resume/cancel.
 
 ### Data Flow
 ```
-User Input (GUI) → WorkflowManager (queue) → Worker Threads
-  → AIBackend (model inference) → Database (SQLite + ChromaDB)
-  → SearchEngine → GUI Display
+User Input (GUI) -> WorkflowManager (queue) -> Worker Threads
+  -> AIBackend (model inference) -> Database (SQLite + ChromaDB)
+  -> SearchEngine -> GUI Display
 ```
 
 ### Per-Project File Structure
 ```
 project_dir/
-├── project_name.cyne          # Project metadata
-├── *.mp4, *.mov, ...          # Video files
-└── _cyne_db/                  # Database folder
-    ├── metadata.db            # SQLite
-    ├── chroma_data/           # ChromaDB vector store
-    ├── faces/                 # Face encodings + names
-    ├── indexed_files.json     # Processing tracker
-    └── settings.json          # User settings (persisted by SettingsManager)
+  project_name.cyne          # Project metadata
+  *.mp4, *.mov, ...          # Video files
+  _cyne_db/                  # Database folder
+    metadata.db              # SQLite
+    chroma_data/             # ChromaDB vector store
+    faces/                   # Face encodings + names
+    indexed_files.json       # Processing tracker
+    settings.json            # User settings (persisted by SettingsManager)
 ```
 
 ## Key Dependencies
@@ -132,9 +142,9 @@ Configured via a `.env` file in the project root (see `.env.example`):
 |---|---|---|
 | **CLIP** | `openai/clip-vit-large-patch14` | Visual embeddings (768-D) for semantic search and tag matching |
 | **BLIP-large** | `Salesforce/blip-image-captioning-large` (default) | Scene captioning (444M params, ~1GB VRAM) |
-| **BLIP-2** | `Salesforce/blip2-opt-2.7b` (opt-in: `USE_BLIP2=True`) | Higher-quality captions (2.7B params, ~3GB VRAM) |
+| **BLIP-2** | `Salesforce/blip2-opt-2.7b` (opt-in via `blip_variant` setting) | Higher-quality captions (2.7B params, ~3GB VRAM) |
 | **YOLOv8** | `yolov8m.pt` (medium) | Bounding-box object detection (80 COCO classes, 0.4 conf threshold) |
-| **Whisper** | `large-v3` / `medium` (faster-whisper) | Speech transcription (accuracy vs speed mode) |
+| **Whisper** | `large-v3` / `medium` (faster-whisper) | Speech transcription (accuracy vs speed mode; overridden by `whisper_model` setting) |
 | **Llama-3.2** | `unsloth/Llama-3.2-3B-Instruct` (4-bit quantized) | Summary generation |
 | **Phi-3** | `microsoft/Phi-3-mini-4k-instruct` | LLM fallback if Llama fails to load |
 
@@ -146,14 +156,14 @@ Models are lazily loaded (only when needed) and managed by the `AIBackend` singl
 Run from the project root:
 
 ```
-python3 -m tests.smoke_search
+venv\Scripts\python.exe -m tests.smoke_search
 ```
 
 `tests/smoke_search.py` exercises `SearchEngine` internals without GPU or real project data.
-It now installs lightweight import stubs for optional heavy dependencies (`torch`, `numpy`,
+It installs lightweight import stubs for optional heavy dependencies (`torch`, `numpy`,
 and selected `core.*` modules), so it can run in minimal environments.
 
-Coverage includes:
+Coverage (23 tests):
 - **Query operator parsing** — AND/OR/NOT boolean operators, `score:>80` / `score:<50` ranges, `duration:30-60`, `"phrase"` extraction, `field:value` searches
 - **Quoted field values** — validates `dialogue:"hello world"` and mixed operator + field queries
 - **Temporal query return shape** — verifies `_search_temporal_sequence` returns a `dict` (keyed by match type), not a list
@@ -164,31 +174,13 @@ Coverage includes:
 
 Tests use `SearchEngine.__new__()` with fake DB/AI/FaceDB stubs to bypass `__init__` and avoid loading any models.
 
-### Phase 5.0 Audit (February 8, 2026)
-Audit scope:
-- `core/search_engine.py`
-- `gui/search_tab.py`
-- `core/workflow_manager.py`
-- `tests/smoke_search.py`
-
-Audit findings and outcomes:
-- Temporal return-shape path was validated end-to-end (`search()` now safely consumes temporal helper mapping output).
-- Filter/sort behavior in `search_tab.py` was validated for emitted match types and implemented sort options.
-- Workflow queue semantics were validated after removing duplicate `reorder_operation` definition.
-- Regression discovered and fixed: quoted field parsing (`dialogue:"hello world"`) was broken by parser ordering/field tokenization changes in `core/search_engine.py`.
-- Regression discovered and fixed: smoke script failed in non-ML environments due hard `torch` import path.
-
-Verification completed:
-- `PYTHONPYCACHEPREFIX=/tmp/pycache python3 -m py_compile core/search_engine.py gui/search_tab.py core/workflow_manager.py tests/smoke_search.py` → passed.
-- `python3 -m tests.smoke_search` → passed (`23` tests, `OK`).
-
 ## Known Issues
 
-- **Some debug logging** may still be scattered in the codebase
 - **Limited export formats** — only SRT currently supported
 - **No undo/redo** functionality in the UI
 - **No timeline visualization** for search results or scenes
 - **Face recognition** is available but not actively wired into the indexing workflow
+- **`language_preference`** — persisted in settings but not yet consumed by translator/transcriber workers
 - **Memory risk** with very large video libraries (mitigated by dynamic batch sizing but no streaming yet)
 - **Single-user only** — no collaboration or cloud sync features
 - **RTX 5070 (sm_120)** — torch 2.10+cu126 only supports up to sm_90; needs PyTorch built with CUDA 12.8+ for full GPU support
@@ -222,10 +214,10 @@ If torch is not installed, the pre-import is silently skipped. Use `run.bat` to 
 - **Connection-per-thread** for SQLite — each thread gets its own connection via `threading.local()`, WAL mode + `busy_timeout=5000` for concurrent access. `_lock` wraps entire read-modify-write sequences to prevent lost updates.
 - **Signal/Slot** for thread-to-UI communication (PyQt6 signals)
 - **Workflow Manager** for task queuing with priority levels (high/normal/low)
-- **Graceful degradation** — LLM fails → template-based summary; model unavailable → skip
+- **Graceful degradation** — LLM fails -> template-based summary; model unavailable -> skip
 - **Settings-driven runtime** — per-project settings from `_cyne_db/settings.json` are wired to actual runtime behavior (see Settings Wiring below)
 
-### Settings Wiring (Phase 5.1)
+### Settings Wiring
 
 Every active setting key in `core/settings_manager.py` is wired to runtime behavior:
 
@@ -234,17 +226,17 @@ Every active setting key in `core/settings_manager.py` is wired to runtime behav
 | `auto_index_on_change` | `MainWindow.__init__` + `_apply_settings_changes()` | Controls file watcher start/stop |
 | `generate_thumbnails` | `workers/indexer.py` Phase 6 | Gated by `get_setting()` per file |
 | `generate_proxies` | `workers/indexer.py` Phase 6 + `config.GENERATE_PROXIES` flag | Gated by `get_setting()` per file |
-| `batch_size` | `IndexerWorker.__init__` | `"auto"` → `get_optimal_batch_size()`, int → direct use |
-| `keyframe_interval` | `IndexerWorker.__init__` | Derives `min_interval`/`max_interval` from setting value |
-| `device` | `AIBackend.configure_from_settings()` | Called on project load and settings change; switches device if no models loaded |
+| `batch_size` | `IndexerWorker.__init__` | `"auto"` -> `get_optimal_batch_size()`, int -> direct use; robust parsing with 1-128 clamp |
+| `keyframe_interval` | `IndexerWorker.__init__` | Derives `min_interval`/`max_interval` from setting value; robust parsing with 1-10 clamp |
+| `device` | `AIBackend.configure_from_settings()` | Called on project load and settings change; `"auto"` re-runs detection; switches device if no models loaded |
 | `blip_variant` | `AIBackend.load_blip()` | Reads setting directly; falls back to `config.USE_BLIP2` |
 | `whisper_model` | `AIBackend.get_whisper_params()` | Overrides accuracy-mode model name (default `large-v3`) |
 | `sidebar_default` | `MainWindow.__init__` + `_apply_settings_changes()` | Collapses/expands sidebar to match preference |
-| `accent_color` | `MainWindow.__init__` + `_apply_settings_changes()` | Updates theme tokens and regenerates stylesheet |
+| `accent_color` | `MainWindow.__init__` + `_apply_settings_changes()` | Calls `set_accent_color()` then regenerates stylesheet |
 | `deepl_api_key` | `MainWindow.__init__` + `_apply_settings_changes()` | Sets `config.DEEPL_API_KEY` and `TRANSLATION_METHOD` |
-| `language_preference` | Read by translator at transcription time | No additional wiring needed |
-| `model_quality` | Informational | Workflow mode (speed/accuracy) set by UI radio buttons in workflow panel |
-| `theme` | Reserved | Single theme currently; token ready for future use |
+| `language_preference` | Persisted only | Not yet consumed by translator/transcriber; ready for future wiring |
+| `model_quality` | Informational | Reserved; workflow mode (speed/accuracy) set by UI radio buttons |
+| `theme` | Reserved | Single dark theme currently; token ready for future use |
 
 Global flags (`USE_BLIP2`, `GENERATE_PROXIES`, `DEEPL_API_KEY`, `TRANSLATION_METHOD`) are synced from per-project settings both at project load (`MainWindow.__init__`) and on settings dialog save (`_apply_settings_changes()`).
 
@@ -254,11 +246,11 @@ Global flags (`USE_BLIP2`, `GENERATE_PROXIES`, `DEEPL_API_KEY`, `TRANSLATION_MET
 - Fallback paths when AI models fail (template summaries, skip operations)
 
 ### UI Theme
-- Cinema Dark with Indigo accent (`#6366f1`), background `#0f0f0f`, surface `#1a1a1a`
-- All design tokens centralized in `gui/theme.py` (`COLORS` dict, `generate_stylesheet()`)
+- Cinema Dark with configurable accent (default Indigo `#6366f1`), background `#0f0f0f`, surface `#1a1a1a`
+- All design tokens centralized in `gui/theme.py` (`COLORS` dict, module-level constants, `generate_stylesheet()`)
+- `set_accent_color(hex)` updates module-level `ACCENT`, `ACCENT_HOVER`, `GLOW` globals and the `COLORS` dict in one call; must be called before `generate_stylesheet()`
 - `config.py` re-exports `COLORS` and `STYLESHEET` for backward compatibility
 - Font: Inter / Segoe UI, 13px base
-- GUI files reference `COLORS['key']` — no hardcoded hex colors in `main_window.py`
 
 ### GPU Support
 - `TORCH_CUDA_ARCH_LIST` is set dynamically at import time based on `torch.cuda.get_device_capability()`
