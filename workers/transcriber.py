@@ -6,16 +6,7 @@ import torch
 from PyQt6.QtCore import QThread, pyqtSignal
 from core.ai_models import AIBackend
 from core.database import Database
-
-LANGUAGE_PREFERENCE_TO_WHISPER = {
-    "english": "en",
-    "spanish": "es",
-    "french": "fr",
-    "german": "de",
-    "japanese": "ja",
-    "chinese": "zh",
-    "korean": "ko",
-}
+from core.settings_manager import get_whisper_language_hint
 
 
 class TranscriberWorker(QThread):
@@ -31,25 +22,6 @@ class TranscriberWorker(QThread):
         self.project_path = project_path
         self.is_running = True
         self.mode = mode  # "speed" or "accuracy"
-
-    @staticmethod
-    def _get_whisper_language_preference():
-        """Return Whisper language code, or None for auto/invalid/missing."""
-        try:
-            from config import get_setting
-            raw_pref = get_setting("language_preference", "auto")
-        except Exception:
-            return None
-
-        if raw_pref is None:
-            return None
-
-        pref = str(raw_pref).strip().lower()
-        if pref == "auto":
-            return None
-        if pref in LANGUAGE_PREFERENCE_TO_WHISPER.values():
-            return pref
-        return LANGUAGE_PREFERENCE_TO_WHISPER.get(pref)
 
     def run(self):
         self.log_signal.emit("Initializing Whisper AI...")
@@ -80,7 +52,7 @@ class TranscriberWorker(QThread):
             self.finished_signal.emit()
             return
 
-        whisper_language = self._get_whisper_language_preference()
+        whisper_language = get_whisper_language_hint()
         if whisper_language:
             self.log_signal.emit(f"Using transcription language preference: {whisper_language}")
 

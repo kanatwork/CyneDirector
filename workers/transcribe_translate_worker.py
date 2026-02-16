@@ -12,35 +12,26 @@ from core.translator import (
     filter_english_segments
 )
 from core.logger import get_logger
+from core.settings_manager import get_whisper_language_hint
 
 logger = get_logger(__name__)
-
-LANGUAGE_PREFERENCE_TO_WHISPER = {
-    "english": "en",
-    "spanish": "es",
-    "french": "fr",
-    "german": "de",
-    "japanese": "ja",
-    "chinese": "zh",
-    "korean": "ko",
-}
 
 
 class TranscribeTranslateWorker(QThread):
     """Worker thread for transcribing and translating audio."""
-    
+
     # Signals
     log_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(int)
     finished_signal = pyqtSignal(bool, str)  # success, error message
     transcription_complete_signal = pyqtSignal(list)  # original language segments
     translation_complete_signal = pyqtSignal(list)  # translated segments
-    
-    def __init__(self, video_path: str, project_path: str, deepl_api_key: str = None, 
+
+    def __init__(self, video_path: str, project_path: str, deepl_api_key: str = None,
                  mode: str = "accuracy", should_transcribe: bool = True, should_translate: bool = False):
         """
         Initialize worker.
-        
+
         Args:
             video_path: Path to video file
             project_path: Project path for database
@@ -57,25 +48,6 @@ class TranscribeTranslateWorker(QThread):
         self.should_transcribe = should_transcribe
         self.should_translate = should_translate
         self.is_running = True
-
-    @staticmethod
-    def _get_whisper_language_preference():
-        """Return Whisper language code, or None for auto/invalid/missing."""
-        try:
-            from config import get_setting
-            raw_pref = get_setting("language_preference", "auto")
-        except Exception:
-            return None
-
-        if raw_pref is None:
-            return None
-
-        pref = str(raw_pref).strip().lower()
-        if pref == "auto":
-            return None
-        if pref in LANGUAGE_PREFERENCE_TO_WHISPER.values():
-            return pref
-        return LANGUAGE_PREFERENCE_TO_WHISPER.get(pref)
     
     def stop(self):
         """Stop the worker."""
@@ -251,7 +223,7 @@ class TranscribeTranslateWorker(QThread):
             self.log_signal.emit("Transcribing audio in original language...")
             # Don't use task="translate" here - we want the original language
             # More sensitive VAD to catch all dialogue
-            whisper_language = self._get_whisper_language_preference()
+            whisper_language = get_whisper_language_hint()
             if whisper_language:
                 self.log_signal.emit(f"Using transcription language preference: {whisper_language}")
             transcribe_kwargs = {
@@ -495,7 +467,7 @@ class TranscribeTranslateWorker(QThread):
             
             # Re-transcribe with translate task - THIS IS KEY: task="translate" translates to English
             self.log_signal.emit("Re-transcribing audio with translation to English...")
-            whisper_language = self._get_whisper_language_preference()
+            whisper_language = get_whisper_language_hint()
             if whisper_language:
                 self.log_signal.emit(f"Using source language hint for translation: {whisper_language}")
             transcribe_kwargs = {

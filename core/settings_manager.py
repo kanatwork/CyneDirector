@@ -34,6 +34,41 @@ DEFAULTS = {
 }
 
 
+LANGUAGE_PREFERENCE_TO_WHISPER = {
+    "english": "en",
+    "spanish": "es",
+    "french": "fr",
+    "german": "de",
+    "japanese": "ja",
+    "chinese": "zh",
+    "korean": "ko",
+}
+
+
+def get_whisper_language_hint():
+    """Return Whisper language code from settings, or None for auto/invalid/missing.
+
+    Maps UI labels (``"english"``, ``"spanish"``, ...) and raw Whisper codes
+    (``"en"``, ``"es"``, ...) to valid codes.  Returns ``None`` for ``"auto"``,
+    missing, or unrecognised values so Whisper uses its own language detection.
+    """
+    try:
+        from config import get_setting
+        raw_pref = get_setting("language_preference", "auto")
+    except Exception:
+        return None
+
+    if raw_pref is None:
+        return None
+
+    pref = str(raw_pref).strip().lower()
+    if pref == "auto":
+        return None
+    if pref in LANGUAGE_PREFERENCE_TO_WHISPER.values():
+        return pref
+    return LANGUAGE_PREFERENCE_TO_WHISPER.get(pref)
+
+
 class SettingsManager:
     """Manages per-project settings stored as JSON in _cyne_db/settings.json."""
 

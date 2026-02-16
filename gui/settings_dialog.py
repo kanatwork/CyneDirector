@@ -388,7 +388,7 @@ class SettingsDialog(QDialog):
 
         # Appearance
         self._set_combo(self._controls["theme"], s.get("theme", "dark"), case_insensitive=True)
-        accent = s.get("accent_color", "#6366f1").lower()
+        accent = (s.get("accent_color") or "#6366f1").lower()
         for btn in self._color_group.buttons():
             if btn.property("hex_color") == accent:
                 btn.setChecked(True)
@@ -561,6 +561,10 @@ class SettingsDialog(QDialog):
         """Parse batch_size setting; returns 'auto', positive int, or None."""
         if value is None or isinstance(value, bool):
             return None
+
+        if isinstance(value, float):
+            value = int(value)
+            return value if value > 0 else None
 
         if isinstance(value, int):
             return value if value > 0 else None
