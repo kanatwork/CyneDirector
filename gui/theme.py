@@ -2,6 +2,8 @@
 # Centralized design system for CyneDirector
 # All colors, fonts, spacing, and stylesheet generation live here.
 
+import re
+
 # ─── Color Palette ───────────────────────────────────────────────
 BACKGROUND      = "#0f0f0f"
 SURFACE         = "#1a1a1a"
@@ -121,6 +123,9 @@ RADIUS_SM = 6
 RADIUS_MD = 8
 RADIUS_LG = 12
 
+_DEFAULT_ACCENT = "#6366f1"
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-f]{6}$")
+
 
 def _lighten_hex(hex_color, factor=0.25):
     """Lighten a hex color by mixing toward white."""
@@ -132,6 +137,22 @@ def _lighten_hex(hex_color, factor=0.25):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _normalize_accent_hex(value):
+    """Return a safe, normalized accent color (#rrggbb)."""
+    if isinstance(value, str):
+        candidate = value.strip().lower()
+        if _HEX_COLOR_RE.fullmatch(candidate):
+            return candidate
+    return _DEFAULT_ACCENT
+
+
+def _glow_from_hex(hex_color):
+    """Return rgba glow string derived from a validated hex color."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r}, {g}, {b}, 0.2)"
+
+
 def set_accent_color(hex_color):
     """Update all accent-derived module-level tokens and COLORS entries.
 
@@ -140,16 +161,18 @@ def set_accent_color(hex_color):
     """
     global ACCENT, ACCENT_HOVER, GLOW
 
-    hex_color = hex_color.strip().lower()
-    if not hex_color.startswith("#") or len(hex_color) != 7:
-        return  # ignore malformed values
+    # Accept only valid #RRGGBB and safely fall back for malformed or non-string values.
+    safe_hex = _normalize_accent_hex(hex_color)
 
-    ACCENT = hex_color
-    ACCENT_HOVER = _lighten_hex(hex_color, 0.25)
-
-    h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    GLOW = f"rgba({r}, {g}, {b}, 0.2)"
+    try:
+        ACCENT = safe_hex
+        ACCENT_HOVER = _lighten_hex(safe_hex, 0.25)
+        GLOW = _glow_from_hex(safe_hex)
+    except Exception:
+        # Final safeguard: never let invalid persisted values crash theme application.
+        ACCENT = _DEFAULT_ACCENT
+        ACCENT_HOVER = _lighten_hex(_DEFAULT_ACCENT, 0.25)
+        GLOW = _glow_from_hex(_DEFAULT_ACCENT)
 
     # Keep COLORS dict in sync for legacy consumers
     COLORS["accent"] = ACCENT

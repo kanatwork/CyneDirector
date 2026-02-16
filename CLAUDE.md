@@ -180,7 +180,6 @@ Tests use `SearchEngine.__new__()` with fake DB/AI/FaceDB stubs to bypass `__ini
 - **No undo/redo** functionality in the UI
 - **No timeline visualization** for search results or scenes
 - **Face recognition** is available but not actively wired into the indexing workflow
-- **`language_preference`** — persisted in settings but not yet consumed by translator/transcriber workers
 - **Memory risk** with very large video libraries (mitigated by dynamic batch sizing but no streaming yet)
 - **Single-user only** — no collaboration or cloud sync features
 - **RTX 5070 (sm_120)** — torch 2.10+cu126 only supports up to sm_90; needs PyTorch built with CUDA 12.8+ for full GPU support
@@ -234,7 +233,7 @@ Every active setting key in `core/settings_manager.py` is wired to runtime behav
 | `sidebar_default` | `MainWindow.__init__` + `_apply_settings_changes()` | Collapses/expands sidebar to match preference |
 | `accent_color` | `MainWindow.__init__` + `_apply_settings_changes()` | Calls `set_accent_color()` then regenerates stylesheet |
 | `deepl_api_key` | `MainWindow.__init__` + `_apply_settings_changes()` | Sets `config.DEEPL_API_KEY` and `TRANSLATION_METHOD` |
-| `language_preference` | Persisted only | Not yet consumed by translator/transcriber; ready for future wiring |
+| `language_preference` | `workers/transcriber.py` + `workers/transcribe_translate_worker.py` | Maps UI values (`auto`, `english`, `spanish`, `french`, `german`, `japanese`, `chinese`, `korean`) to Whisper language hint (`None`, `en`, `es`, `fr`, `de`, `ja`, `zh`, `ko`); `auto`/missing/invalid keeps Whisper auto-detect |
 | `model_quality` | Informational | Reserved; workflow mode (speed/accuracy) set by UI radio buttons |
 | `theme` | Reserved | Single dark theme currently; token ready for future use |
 
@@ -248,7 +247,7 @@ Global flags (`USE_BLIP2`, `GENERATE_PROXIES`, `DEEPL_API_KEY`, `TRANSLATION_MET
 ### UI Theme
 - Cinema Dark with configurable accent (default Indigo `#6366f1`), background `#0f0f0f`, surface `#1a1a1a`
 - All design tokens centralized in `gui/theme.py` (`COLORS` dict, module-level constants, `generate_stylesheet()`)
-- `set_accent_color(hex)` updates module-level `ACCENT`, `ACCENT_HOVER`, `GLOW` globals and the `COLORS` dict in one call; must be called before `generate_stylesheet()`
+- `set_accent_color(hex)` accepts only valid `#RRGGBB`, falls back to default Indigo `#6366f1` for invalid values, and updates `ACCENT`/`ACCENT_HOVER`/`GLOW` plus the `COLORS` dict in one call before `generate_stylesheet()`
 - `config.py` re-exports `COLORS` and `STYLESHEET` for backward compatibility
 - Font: Inter / Segoe UI, 13px base
 

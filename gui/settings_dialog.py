@@ -381,8 +381,7 @@ class SettingsDialog(QDialog):
         self._set_combo(self._controls["whisper_model"], s.get("whisper_model", "large-v3"))
 
         # Indexing
-        self._set_combo(self._controls["batch_size"],
-                        str(s.get("batch_size", "auto")), case_insensitive=True)
+        self._load_batch_size_value(s.get("batch_size", "auto"))
         self._controls["generate_proxies"].setChecked(s.get("generate_proxies", False))
         self._controls["generate_thumbnails"].setChecked(s.get("generate_thumbnails", True))
         self._controls["keyframe_interval"].setValue(s.get("keyframe_interval", 2))
@@ -415,8 +414,11 @@ class SettingsDialog(QDialog):
         self._sm.set("whisper_model", self._controls["whisper_model"].currentText())
 
         # Indexing
-        batch_text = self._controls["batch_size"].currentText().lower()
-        self._sm.set("batch_size", batch_text if batch_text == "auto" else int(batch_text))
+        parsed_batch = self._parse_batch_size(self._controls["batch_size"].currentText())
+        if parsed_batch == "auto" or parsed_batch is None:
+            self._sm.set("batch_size", "auto")
+        else:
+            self._sm.set("batch_size", parsed_batch)
         self._sm.set("generate_proxies", self._controls["generate_proxies"].isChecked())
         self._sm.set("generate_thumbnails", self._controls["generate_thumbnails"].isChecked())
         self._sm.set("keyframe_interval", self._controls["keyframe_interval"].value())
@@ -531,6 +533,51 @@ class SettingsDialog(QDialog):
                 if text == str(value):
                     combo.setCurrentIndex(i)
                     return
+
+    def _load_batch_size_value(self, value):
+        """Load batch_size into combo while preserving valid legacy custom ints."""
+        combo = self._controls["batch_size"]
+        parsed = self._parse_batch_size(value)
+
+        if parsed == "auto" or parsed is None:
+            self._set_combo(combo, "Auto", case_insensitive=True)
+            return
+
+        custom_value = str(parsed)
+        self._ensure_combo_option(combo, custom_value)
+        self._set_combo(combo, custom_value, case_insensitive=True)
+
+    @staticmethod
+    def _ensure_combo_option(combo, value):
+        """Ensure combo includes an option (case-insensitive check)."""
+        needle = str(value).strip().lower()
+        for i in range(combo.count()):
+            if combo.itemText(i).strip().lower() == needle:
+                return
+        combo.addItem(str(value))
+
+    @staticmethod
+    def _parse_batch_size(value):
+        """Parse batch_size setting; returns 'auto', positive int, or None."""
+        if value is None or isinstance(value, bool):
+            return None
+
+        if isinstance(value, int):
+            return value if value > 0 else None
+
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            if text.lower() == "auto":
+                return "auto"
+            if text.startswith("+"):
+                text = text[1:]
+            if text.isdigit():
+                parsed = int(text)
+                return parsed if parsed > 0 else None
+
+        return None
 
     # ── Navigation ──────────────────────────────────────────────────
 

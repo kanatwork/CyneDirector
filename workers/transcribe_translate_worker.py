@@ -15,6 +15,16 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
+LANGUAGE_PREFERENCE_TO_WHISPER = {
+    "english": "en",
+    "spanish": "es",
+    "french": "fr",
+    "german": "de",
+    "japanese": "ja",
+    "chinese": "zh",
+    "korean": "ko",
+}
+
 
 class TranscribeTranslateWorker(QThread):
     """Worker thread for transcribing and translating audio."""
@@ -47,6 +57,25 @@ class TranscribeTranslateWorker(QThread):
         self.should_transcribe = should_transcribe
         self.should_translate = should_translate
         self.is_running = True
+
+    @staticmethod
+    def _get_whisper_language_preference():
+        """Return Whisper language code, or None for auto/invalid/missing."""
+        try:
+            from config import get_setting
+            raw_pref = get_setting("language_preference", "auto")
+        except Exception:
+            return None
+
+        if raw_pref is None:
+            return None
+
+        pref = str(raw_pref).strip().lower()
+        if pref == "auto":
+            return None
+        if pref in LANGUAGE_PREFERENCE_TO_WHISPER.values():
+            return pref
+        return LANGUAGE_PREFERENCE_TO_WHISPER.get(pref)
     
     def stop(self):
         """Stop the worker."""
@@ -222,12 +251,17 @@ class TranscribeTranslateWorker(QThread):
             self.log_signal.emit("Transcribing audio in original language...")
             # Don't use task="translate" here - we want the original language
             # More sensitive VAD to catch all dialogue
-            segments, info = model.transcribe(
-                self.video_path,
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=200)  # More sensitive
-            )
+            whisper_language = self._get_whisper_language_preference()
+            if whisper_language:
+                self.log_signal.emit(f"Using transcription language preference: {whisper_language}")
+            transcribe_kwargs = {
+                "beam_size": 5,
+                "vad_filter": True,
+                "vad_parameters": dict(min_silence_duration_ms=200),  # More sensitive
+            }
+            if whisper_language:
+                transcribe_kwargs["language"] = whisper_language
+            segments, info = model.transcribe(self.video_path, **transcribe_kwargs)
             
             # Capture detected language from Whisper
             detected_language = getattr(info, 'language', None)
@@ -461,13 +495,18 @@ class TranscribeTranslateWorker(QThread):
             
             # Re-transcribe with translate task - THIS IS KEY: task="translate" translates to English
             self.log_signal.emit("Re-transcribing audio with translation to English...")
-            segments, info = model.transcribe(
-                self.video_path,
-                task="translate",  # This translates to English
-                beam_size=5,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=300)
-            )
+            whisper_language = self._get_whisper_language_preference()
+            if whisper_language:
+                self.log_signal.emit(f"Using source language hint for translation: {whisper_language}")
+            transcribe_kwargs = {
+                "task": "translate",  # This translates to English
+                "beam_size": 5,
+                "vad_filter": True,
+                "vad_parameters": dict(min_silence_duration_ms=300),
+            }
+            if whisper_language:
+                transcribe_kwargs["language"] = whisper_language
+            segments, info = model.transcribe(self.video_path, **transcribe_kwargs)
             
             translated_segments = []
             for segment in segments:
@@ -617,4 +656,3 @@ class TranscribeTranslateWorker(QThread):
             logger.error(f"_format_translated_segments: No valid segments after formatting (input had {len(segments)} segments)")
         
         return formatted
-
