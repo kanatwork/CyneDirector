@@ -30,10 +30,18 @@ class IndexerWorker(QThread):
         self.is_running = True
         self.mode = mode  # "speed" or "accuracy"
 
-        # --- Per-project settings ---
+        # --- Per-project settings (with robust parsing) ---
         from config import get_setting
         batch_setting = get_setting("batch_size", "auto")
-        keyframe_interval = get_setting("keyframe_interval", 2)
+        raw_kf = get_setting("keyframe_interval", 2)
+
+        # Sanitize keyframe_interval: accept int, float, or numeric string; clamp 1-10
+        try:
+            keyframe_interval = int(float(raw_kf))
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid keyframe_interval '{raw_kf}', defaulting to 2")
+            keyframe_interval = 2
+        keyframe_interval = max(1, min(10, keyframe_interval))
 
         # --- Mode-based Settings ---
         # Optimize batch size based on available memory and device
@@ -58,9 +66,18 @@ class IndexerWorker(QThread):
             self.tag_threshold_percent = 0.20  # 20% of max score for speed mode
             self.min_frames_for_tag = 1  # Tag appears in at least 1 frame
 
-        # Apply batch_size setting: "auto" uses RAM-based sizing, int overrides
+        # Sanitize batch_size: accept "auto", int, or numeric string; clamp 1-128
+        parsed_batch = None
         if isinstance(batch_setting, int) and batch_setting > 0:
-            self.batch_size = batch_setting
+            parsed_batch = batch_setting
+        elif isinstance(batch_setting, str) and batch_setting.strip().lower() != "auto":
+            try:
+                parsed_batch = int(batch_setting.strip())
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid batch_size '{batch_setting}', using auto")
+
+        if parsed_batch is not None:
+            self.batch_size = max(1, min(128, parsed_batch))
         else:
             self.batch_size = auto_batch
 

@@ -185,8 +185,8 @@ class SettingsDialog(QDialog):
         combo_quality = QComboBox()
         combo_quality.addItems(["Fast", "Balanced", "Quality"])
         self._controls["model_quality"] = combo_quality
-        lay.addWidget(self._setting_row("Model Quality",
-                                        "Affects model selection and precision", combo_quality))
+        lay.addWidget(self._setting_row("Model Quality (Reserved)",
+                                        "Saved for future use. Speed/accuracy is set per-workflow.", combo_quality))
 
         lay.addWidget(self._section_header("Models"))
         toggle_blip = AnimatedToggle()

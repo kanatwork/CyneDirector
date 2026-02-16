@@ -126,9 +126,8 @@ class MainWindow(QMainWindow):
         # --- Apply accent_color from settings on launch ---
         accent = _cfg_init.get_setting("accent_color", "#6366f1")
         if accent != COLORS.get('accent'):
-            from gui.theme import COLORS as THEME_COLORS, generate_stylesheet
-            THEME_COLORS['accent'] = accent
-            COLORS['accent'] = accent
+            from gui.theme import set_accent_color, generate_stylesheet
+            set_accent_color(accent)
             _cfg_init.STYLESHEET = generate_stylesheet()
             self.setStyleSheet(_cfg_init.STYLESHEET)
 
@@ -1992,9 +1991,8 @@ class MainWindow(QMainWindow):
         # --- Accent color — update theme tokens and regenerate stylesheet ---
         accent = _cfg.get_setting("accent_color", "#6366f1")
         if accent != COLORS.get('accent'):
-            from gui.theme import COLORS as THEME_COLORS, generate_stylesheet
-            THEME_COLORS['accent'] = accent
-            COLORS['accent'] = accent
+            from gui.theme import set_accent_color, generate_stylesheet
+            set_accent_color(accent)
             _cfg.STYLESHEET = generate_stylesheet()
             self.setStyleSheet(_cfg.STYLESHEET)
 

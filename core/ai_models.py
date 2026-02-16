@@ -149,6 +149,9 @@ class AIBackend:
         device differs from the current one and no models are loaded,
         the backend switches devices immediately.  If models are already
         loaded it logs a warning and skips (a restart is needed).
+
+        ``"auto"`` re-runs auto-detection (useful when switching back from
+        a forced device).  ``"cpu"`` skips CUDA/MPS probes entirely.
         """
         try:
             from config import get_setting
@@ -156,11 +159,18 @@ class AIBackend:
         except Exception:
             return  # settings not yet available — keep auto-detected
 
-        if preferred in (None, "auto"):
-            return  # nothing to override
+        if preferred is None:
+            preferred = "auto"
+        preferred = str(preferred).strip().lower()
 
-        target_device, target_dtype = self._detect_best_device(preferred)
+        # Determine target device
+        if preferred == "auto":
+            target_device, target_dtype = self._detect_best_device()
+        else:
+            target_device, target_dtype = self._detect_best_device(preferred)
+
         if target_device == self.device:
+            logger.debug(f"Device already set to {self.device}, no change needed")
             return  # already on the right device
 
         # Only switch if no models are loaded yet
@@ -170,12 +180,13 @@ class AIBackend:
         ])
         if models_loaded:
             logger.warning(
-                f"Device change requested ({self.device} → {target_device}) "
-                "but models are already loaded — restart required"
+                f"Device change requested ({self.device} -> {target_device}) "
+                "but models are already loaded. Please restart the application "
+                "for the new device setting to take effect."
             )
             return
 
-        logger.info(f"Switching AI device: {self.device} → {target_device}")
+        logger.info(f"Switching AI device: {self.device} -> {target_device}")
         self.device = target_device
         self.dtype = target_dtype
 

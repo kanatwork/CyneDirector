@@ -122,6 +122,41 @@ RADIUS_MD = 8
 RADIUS_LG = 12
 
 
+def _lighten_hex(hex_color, factor=0.25):
+    """Lighten a hex color by mixing toward white."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    r = min(255, int(r + (255 - r) * factor))
+    g = min(255, int(g + (255 - g) * factor))
+    b = min(255, int(b + (255 - b) * factor))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def set_accent_color(hex_color):
+    """Update all accent-derived module-level tokens and COLORS entries.
+
+    Call this *before* ``generate_stylesheet()`` so the f-string picks up
+    the new values.  Safe to call multiple times.
+    """
+    global ACCENT, ACCENT_HOVER, GLOW
+
+    hex_color = hex_color.strip().lower()
+    if not hex_color.startswith("#") or len(hex_color) != 7:
+        return  # ignore malformed values
+
+    ACCENT = hex_color
+    ACCENT_HOVER = _lighten_hex(hex_color, 0.25)
+
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    GLOW = f"rgba({r}, {g}, {b}, 0.2)"
+
+    # Keep COLORS dict in sync for legacy consumers
+    COLORS["accent"] = ACCENT
+    COLORS["accent_hover"] = ACCENT_HOVER
+    COLORS["glow"] = GLOW
+
+
 def generate_stylesheet() -> str:
     """Return a comprehensive QSS string for the entire application."""
     return f"""
