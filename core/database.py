@@ -148,6 +148,7 @@ class Database:
                 return json.loads(row['json_data'])
         except Exception as e:
             logger.error(f"SQL Read Error: {e}")
+            raise
         return {}
 
     def _save_data(self, video_path, data):
@@ -155,6 +156,7 @@ class Database:
         if "last_scanned" not in data:
             data["last_scanned"] = time.time()
         json_str = json.dumps(data)
+        conn = None
         try:
             conn = self._get_conn()
             conn.execute("""
@@ -166,7 +168,10 @@ class Database:
             """, (video_path, data["last_scanned"], json_str))
             conn.commit()
         except Exception as e:
+            if conn is not None:
+                conn.rollback()
             logger.error(f"SQL Save Error: {e}")
+            raise
 
     # --- PUBLIC API (Compatible with MainWindow) ---
     # Every public method acquires _lock so that read-modify-write
@@ -189,10 +194,18 @@ class Database:
             data["shot_type"] = shot_type
             self._save_data(video_path, data)
 
-    def save_transcript(self, video_path, transcript_list):
+    def save_transcript(self, video_path, transcript_list, source_signature=None):
         with self._lock:
+            collection = getattr(self, "transcripts", None)
+            if collection is not None:
+                collection.delete(where={"source": video_path})
             data = self._get_data(video_path)
             data["transcript"] = transcript_list
+            for key in ("transcript_translated", "translation_timestamp", "translation_method",
+                        "translation_source_signature", "transcript_source_signature"):
+                data.pop(key, None)
+            if source_signature is not None:
+                data["transcript_source_signature"] = source_signature
             self._save_data(video_path, data)
 
     def ensure_segment_languages(self, video_path):
@@ -229,6 +242,12 @@ class Database:
 
     def clear_metadata_keys(self, video_path, keys_to_remove):
         with self._lock:
+            if "transcript" in keys_to_remove:
+                collection = getattr(self, "transcripts", None)
+                if collection is not None:
+                    collection.delete(where={"source": video_path})
+            if "tags" in keys_to_remove:
+                self.clear_visual_embeddings(video_path)
             data = self._get_data(video_path)
             changed = False
             for key in keys_to_remove:
@@ -237,6 +256,12 @@ class Database:
                     changed = True
             if changed:
                 self._save_data(video_path, data)
+
+    def clear_visual_embeddings(self, video_path):
+        for name in ("visuals", "temporal_sequences"):
+            collection = getattr(self, name, None)
+            if collection is not None:
+                collection.delete(where={"source": video_path})
 
     def add_visual_embeddings(self, video_path, vectors, timestamps):
         # OPTIMIZATION: Batch ChromaDB writes for better performance
@@ -253,6 +278,7 @@ class Database:
                 self.visuals.upsert(ids=ids, embeddings=chunk_vectors, metadatas=metadatas)
             except Exception as e:
                 logger.error(f"DB ERROR (chunk {i//chunk_size + 1}): {e}")
+                raise
 
     def add_temporal_sequence(self, video_path, sequence_embedding, start_time, end_time, description=""):
         """Store temporal sequence embedding for temporal search."""

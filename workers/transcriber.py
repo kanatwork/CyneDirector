@@ -7,6 +7,8 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from core.ai_models import AIBackend
 from core.database import Database
 from core.settings_manager import get_whisper_language_hint
+from core.source_state import source_signature, needs_processing
+from core.clip_features import as_clip_tensor
 
 
 class TranscriberWorker(QThread):
@@ -21,9 +23,19 @@ class TranscriberWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
+        self.errors = []
         self.mode = mode  # "speed" or "accuracy"
 
     def run(self):
+        try:
+            self._run_transcription()
+        except Exception as exc:
+            self.errors.append(str(exc))
+            self.log_signal.emit(f"CRITICAL: Transcription failed - {exc}")
+        finally:
+            self.finished_signal.emit()
+
+    def _run_transcription(self):
         self.log_signal.emit("Initializing Whisper AI...")
         
         # 1. Load the shared AI Backend
@@ -48,8 +60,8 @@ class TranscriberWorker(QThread):
                     model = WhisperModel("large-v3", device=whisper_device, compute_type=compute_type)
                     self.log_signal.emit(f"Whisper Large-v3 ({compute_type}) loaded for speed")
         except Exception as e:
+            self.errors.append(str(e))
             self.log_signal.emit(f"CRITICAL: Audio Model Failed - {e}")
-            self.finished_signal.emit()
             return
 
         whisper_language = get_whisper_language_hint()
@@ -62,6 +74,7 @@ class TranscriberWorker(QThread):
             if not self.is_running: break
             
             filename = os.path.basename(video_path)
+            signature = source_signature(video_path)
             self.log_signal.emit(f"Processing {idx + 1}/{total_files}: {filename}")
             
             # Check if transcript already exists
@@ -71,9 +84,7 @@ class TranscriberWorker(QThread):
             if existing_transcript and isinstance(existing_transcript, list) and len(existing_transcript) > 0:
                 # Check if file was modified since last transcription
                 try:
-                    file_mtime = os.path.getmtime(video_path)
-                    last_scanned = meta.get("last_scanned", 0)
-                    file_modified = file_mtime > last_scanned if last_scanned > 0 else True
+                    file_modified = needs_processing(video_path, meta, "transcript")
                     
                     if not file_modified:
                         self.log_signal.emit(f"  → Transcript already exists ({len(existing_transcript)} segments), skipping...")
@@ -174,7 +185,7 @@ class TranscriberWorker(QThread):
 
                 # 3. Save Transcript to Database
                 self.log_signal.emit(f"  → Saving {len(segment_list)} transcript segments...")
-                db.save_transcript(video_path, segment_list)
+                db.save_transcript(video_path, segment_list, source_signature=signature)
                 
                 # Update last_scanned timestamp for incremental indexing
                 try:
@@ -217,10 +228,10 @@ class TranscriberWorker(QThread):
                                     if batch_num % 5 == 0 or batch_num == total_batches:
                                         self.log_signal.emit(f"  → Processing embedding batch {batch_num}/{total_batches}...")
                                     
-                                    inputs = ai_backend.clip_processor(text=batch, return_tensors="pt", padding=True).to(ai_backend.device)
+                                    inputs = ai_backend.clip_processor(text=batch, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai_backend.device)
                                     
                                     with torch.no_grad():
-                                        text_features = ai_backend.clip_model.get_text_features(**inputs)
+                                        text_features = as_clip_tensor(ai_backend.clip_model.get_text_features(**inputs))
                                         text_features /= text_features.norm(p=2, dim=-1, keepdim=True)
                                         embeddings = text_features.cpu().numpy().tolist()
                                     
@@ -309,6 +320,7 @@ class TranscriberWorker(QThread):
                 self.log_signal.emit(f"  Completed: {filename} ({len(segment_list)} segments, {len(full_text)} chars)")
 
             except Exception as e:
+                self.errors.append(f"{filename}: {e}")
                 self.log_signal.emit(f"Error on {filename}: {str(e)}")
 
             # Update progress bar
@@ -320,7 +332,6 @@ class TranscriberWorker(QThread):
         ai.unload_models()
         
         self.log_signal.emit("Transcription Complete.")
-        self.finished_signal.emit()
 
     def stop(self):
         self.is_running = False

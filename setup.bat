@@ -102,7 +102,8 @@ echo   (This downloads ~2.5 GB - may take a few minutes)
 echo ============================================================
 echo.
 
-python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+:: CUDA 12.8 supports RTX 50-series GPUs; cu126 falls back to CPU on these cards.
+python -m pip install --upgrade torch==2.10.0 torchvision==0.25.0 --index-url https://download.pytorch.org/whl/cu128
 if !errorlevel! neq 0 (
     echo.
     echo [WARNING] CUDA install failed. Trying CPU-only PyTorch...

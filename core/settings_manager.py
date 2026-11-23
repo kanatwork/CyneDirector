@@ -88,10 +88,12 @@ class SettingsManager:
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     stored = json.load(f)
+                if not isinstance(stored, dict):
+                    raise ValueError("Settings must be a JSON object")
                 # Merge: defaults first, then stored values override
                 self._data = {**DEFAULTS, **stored}
                 logger.debug(f"Settings loaded from {self._path}")
-            except (json.JSONDecodeError, OSError) as e:
+            except (ValueError, OSError) as e:
                 logger.warning(f"Failed to read settings, using defaults: {e}")
                 self._data = dict(DEFAULTS)
         else:

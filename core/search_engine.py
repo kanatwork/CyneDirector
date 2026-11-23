@@ -9,6 +9,7 @@ from core.database import Database
 from core.ai_models import AIBackend
 from core.face_db import FaceDB
 from core.logger import get_logger
+from core.clip_features import as_clip_tensor
 
 logger = get_logger(__name__)
 
@@ -37,9 +38,11 @@ class SearchEngine:
         Refreshes the search index. 
         """
         print("Building Search Index...")
+        self.result_cache.clear()
+        self.result_cache_timestamps.clear()
         
         # 1. If provided a specific list (from Project Tree), use that.
-        if file_list:
+        if file_list is not None:
             for video_path in file_list:
                 self._index_single_file(video_path)
         else:
@@ -69,7 +72,9 @@ class SearchEngine:
         
         # Fallback to JSON sidecar (legacy)
         meta_path = f"{video_path}.json"
-        if not os.path.exists(meta_path): return
+        if not os.path.exists(meta_path):
+            self.cache.pop(video_path, None)
+            return
         
         try:
             with open(meta_path, 'r', encoding='utf-8') as f:
@@ -156,9 +161,9 @@ class SearchEngine:
             self.ai.load_clip()
         
         if self.ai.clip_model and self.ai.clip_processor:
-            inputs = self.ai.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.ai.device)
+            inputs = self.ai.clip_processor(text=[query], return_tensors="pt", padding=True, truncation=True, max_length=77).to(self.ai.device)
             with torch.no_grad():
-                text_features = self.ai.clip_model.get_text_features(**inputs)
+                text_features = as_clip_tensor(self.ai.clip_model.get_text_features(**inputs))
                 text_features /= text_features.norm(p=2, dim=-1, keepdim=True)
                 query_vector = text_features.cpu().numpy()[0].tolist()
             
@@ -259,7 +264,7 @@ class SearchEngine:
                 
                 # Combine contexts
                 contexts = [r.get('context', '') for r in group_results]
-                combined_context = " | ".join(set(contexts[:3]))  # Limit to 3 unique contexts
+                combined_context = " | ".join(dict.fromkeys(contexts[:3]))
                 
                 # Use the best match type as primary
                 best_result = max(group_results, key=lambda x: x['weighted_score'])
@@ -270,7 +275,7 @@ class SearchEngine:
                     'context': combined_context,
                     'score': fused_score,
                     'timestamp': best_result.get('timestamp', 0),
-                    'match_types': list(set(r['source_type'] for r in group_results)),
+                    'match_types': list(dict.fromkeys(r['source_type'] for r in group_results)),
                     'base_score': max_score,
                     'modality_count': modality_count
                 }
@@ -583,17 +588,22 @@ class SearchEngine:
         
         terms = []
         operators = []
+        negative_terms = []
+        negate_next = False
         for i, token in enumerate(tokens):
             token = token.strip()
             if not token:
                 continue
             if token.upper() in ['AND', 'OR', 'NOT']:
                 operators.append(token.upper())
+                negate_next = token.upper() == 'NOT'
             else:
-                terms.append(token)
+                (negative_terms if negate_next else terms).append(token)
+                negate_next = False
         
         parsed['terms'] = terms
         parsed['operators'] = operators
+        parsed['negative_terms'] = negative_terms
         
         return parsed
 
@@ -606,18 +616,18 @@ class SearchEngine:
             min_score, max_score = parsed_query['score_range']
             filtered = [r for r in filtered if min_score <= r.get('score', 0) <= max_score]
         
-        # Field-specific filters
-        if 'visual' in parsed_query.get('fields', {}):
-            # Only visual matches
-            filtered = [r for r in filtered if 'VISUAL' in r.get('match_type', '')]
-        
-        if 'dialogue' in parsed_query.get('fields', {}):
-            # Only dialogue matches
-            filtered = [r for r in filtered if 'DIALOGUE' in r.get('match_type', '')]
-        
-        if 'tag' in parsed_query.get('fields', {}):
-            # Only tag matches
-            filtered = [r for r in filtered if r.get('match_type') == 'TAG']
+        # Fused results retain their constituent match types.
+        field_types = {'visual': 'VISUAL', 'dialogue': 'DIALOGUE', 'tag': 'TAG',
+                       'objects': 'OBJECT', 'cast': 'CAST'}
+        for field, match_type in field_types.items():
+            if field in parsed_query.get('fields', {}):
+                filtered = [r for r in filtered if any(
+                    match_type in kind for kind in r.get('match_types', [r.get('match_type', '')]))]
+
+        if parsed_query.get('duration_range'):
+            minimum, maximum = parsed_query['duration_range']
+            filtered = [r for r in filtered if minimum <= r.get(
+                'duration', self.cache.get(r['path'], {}).get('duration', -1)) <= maximum]
         
         # Phrase matching (exact phrase in context)
         if parsed_query.get('phrases'):
@@ -628,8 +638,7 @@ class SearchEngine:
                     if phrase.lower() in context_lower:
                         phrase_filtered.append(result)
                         break
-            if phrase_filtered:
-                filtered = phrase_filtered
+            filtered = phrase_filtered
         
         return filtered
 
@@ -651,11 +660,13 @@ class SearchEngine:
         
         # Extract base query (without operators for caching)
         base_query = parsed_query['original']
-        if parsed_query['terms']:
-            base_query = ' '.join(parsed_query['terms'])
+        content_terms = (parsed_query['terms'] + parsed_query['phrases']
+                         + list(parsed_query['fields'].values()))
+        if content_terms:
+            base_query = ' '.join(content_terms)
         
         # Check cache first (use base query for cache key) with TTL
-        cache_key = base_query.lower().strip()
+        cache_key = (query_normalized, use_expansion, use_decomposition)
         if use_cache and cache_key in self.result_cache and not parsed_query.get('fields') and not parsed_query.get('score_range'):
             # Check if cache entry is still valid (TTL)
             cache_time = self.result_cache_timestamps.get(cache_key, 0)
@@ -722,6 +733,8 @@ class SearchEngine:
                     if len(parts) == 2:
                         action_a = parts[0].strip()
                         action_b = parts[1].strip()
+                        if kw == " after ":
+                            action_a, action_b = action_b, action_a
                         
                         # Get embeddings for both actions
                         query_vector_a = self._get_query_embedding(action_a)
@@ -814,18 +827,15 @@ class SearchEngine:
         
         # Handle NOT operator (exclude results)
         if 'NOT' in parsed_query.get('operators', []):
-            not_terms = []
-            for i, op in enumerate(parsed_query['operators']):
-                if op == 'NOT' and i < len(parsed_query['terms']):
-                    not_terms.append(parsed_query['terms'][i])
-            
-            # Remove results matching NOT terms
-            for not_term in not_terms:
+            for not_term in parsed_query.get('negative_terms', []):
                 not_lower = not_term.lower()
+                excluded = self._collect_results_by_type(
+                    not_term, not_lower.split(), not_lower, None)
+                excluded_paths = {r['path'] for matches in excluded.values() for r in matches}
                 for match_type in list(all_results_by_type.keys()):
                     all_results_by_type[match_type] = [
                         r for r in all_results_by_type[match_type]
-                        if not_lower not in r.get('context', '').lower()
+                        if r['path'] not in excluded_paths
                     ]
         
         # Fuse multi-modal results
@@ -880,6 +890,10 @@ class SearchEngine:
         """
         if not query_vector or not self.db.temporal_sequences:
             return {}
+
+        query_vector_b = self._get_query_embedding(action_b)
+        if not query_vector_b:
+            return {}
         
         try:
             # Search for sequences matching action A
@@ -894,30 +908,38 @@ class SearchEngine:
             if seq_res_a['ids'] and seq_res_a['ids'][0]:
                 for i, seq_id in enumerate(seq_res_a['ids'][0]):
                     metadata_a = seq_res_a['metadatas'][0][i]
+                    distance_a = seq_res_a['distances'][0][i]
+                    if distance_a > 0.5:
+                        continue
                     path = metadata_a['source']
                     end_time_a = metadata_a.get('end_time', 0)
                     
                     # Look for sequence B starting within max_gap_seconds after A ends
                     # Query temporal sequences for the same video
                     try:
-                        # Get all sequences for this video
-                        all_seqs = self.db.temporal_sequences.get(
+                        # B must visually match the second concept, rather than
+                        # accepting any later scene from the same video.
+                        all_seqs = self.db.temporal_sequences.query(
+                            query_embeddings=[query_vector_b], n_results=50,
                             where={"source": path},
-                            include=["metadatas"]
+                            include=["metadatas", "distances"]
                         )
                         
                         if all_seqs and all_seqs['metadatas']:
-                            for seq_meta in all_seqs['metadatas']:
+                            for j, seq_meta in enumerate(all_seqs['metadatas'][0]):
+                                distance_b = all_seqs['distances'][0][j]
+                                if distance_b > 0.5:
+                                    continue
                                 start_time_b = seq_meta.get('start_time', 0)
                                 gap = start_time_b - end_time_a
                                 
-                                if 0 < gap <= max_gap_seconds:
+                                if 0 <= gap <= max_gap_seconds:
                                     # Found sequence: A -> B
                                     sequence_results.append({
                                         "path": path,
                                         "match_type": "TEMPORAL SEQUENCE",
                                         "context": f"Sequence: {action_a} then {action_b} (gap: {int(gap)}s)",
-                                        "score": 90,  # High score for temporal matches
+                                        "score": max(0, (1 - max(distance_a, distance_b)) * 100),
                                         "timestamp": end_time_a,
                                         "sequence_start": metadata_a.get('start_time', 0),
                                         "sequence_end": seq_meta.get('end_time', 0)
@@ -969,7 +991,7 @@ class SearchEngine:
         # Get image embedding
         inputs = self.ai.clip_processor(images=ref_image, return_tensors="pt", padding=True).to(self.ai.device)
         with torch.no_grad():
-            image_features = self.ai.clip_model.get_image_features(**inputs)
+            image_features = as_clip_tensor(self.ai.clip_model.get_image_features(**inputs))
             image_features /= image_features.norm(p=2, dim=-1, keepdim=True)
             ref_embedding = image_features.cpu().numpy()[0].tolist()
         
@@ -1089,7 +1111,7 @@ class SearchEngine:
                 
                 inputs = self.ai.clip_processor(images=pil_img, return_tensors="pt", padding=True).to(self.ai.device)
                 with torch.no_grad():
-                    img_features = self.ai.clip_model.get_image_features(**inputs)
+                    img_features = as_clip_tensor(self.ai.clip_model.get_image_features(**inputs))
                     img_features /= img_features.norm(p=2, dim=-1, keepdim=True)
                     sequence_embeddings.append(img_features.cpu().numpy()[0])
         
@@ -1167,7 +1189,8 @@ class SearchEngine:
                 result['score'] = max(0, result['score'] * (1.0 - diversity_penalty))
         
         # Sort by final score
-        results.sort(key=lambda x: x['score'], reverse=True)
+        results.sort(key=lambda x: (-x['score'], x['path'].casefold(),
+                                    x.get('timestamp', 0), x.get('match_type', '')))
         
         # Limit to top 100 results
         return results[:100]

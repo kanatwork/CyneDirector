@@ -312,5 +312,82 @@ class TestDecomposeQuery(unittest.TestCase):
         self.assertEqual(parts, ["cat"])
 
 
+class TestReviewSearchRegressions(unittest.TestCase):
+    def setUp(self):
+        self.engine = _make_engine()
+        self.engine.cache = {
+            "bride.mp4": {"summary": "bride", "duration": 20},
+            "groom.mp4": {"summary": "groom", "duration": 40},
+            "couple.mp4": {"summary": "bride and groom", "duration": 60},
+            "vows.mp4": {"transcript": [{"text": "I promise to love you!", "start": 12, "end": 15}]},
+        }
+
+    def search(self, query):
+        return self.engine.search(query, use_expansion=False)
+
+    def test_boolean_queries_do_not_share_cache_entries(self):
+        both = self.search("bride AND groom")
+        either = self.search("bride OR groom")
+        self.assertEqual({r['path'] for r in both['results']}, {"couple.mp4"})
+        self.assertEqual({r['path'] for r in either['results']}, {"bride.mp4", "groom.mp4", "couple.mp4"})
+        self.assertTrue(self.search("bride OR groom")['cached'])
+
+    def test_not_excludes_its_operand(self):
+        results = self.search("bride NOT groom")['results']
+        self.assertEqual({r['path'] for r in results}, {"bride.mp4"})
+
+    def test_dialogue_field_searches_its_value(self):
+        results = self.search('dialogue:"promise to love"')['results']
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['timestamp'], 12)
+
+    def test_unmatched_phrase_returns_no_unrelated_hits(self):
+        self.engine.cache["test.mp4"] = {"summary": "a promise in another context"}
+        self.assertEqual(self.search('promise "missing exact phrase"')['results'], [])
+
+    def test_fused_dialogue_matches_survive_field_filter(self):
+        result = {"path": "vows.mp4", "match_type": "MULTI-MODAL (2 sources)",
+                  "match_types": ["VISUAL (AI)", "DIALOGUE"], "score": 90}
+        filtered = self.engine._apply_query_filters([result], {"fields": {"dialogue": "promise"}})
+        self.assertEqual(filtered, [result])
+
+    def test_duration_filter_does_not_poison_unfiltered_search(self):
+        short = self.search("duration:0-30 bride")
+        all_brides = self.search("bride")
+        self.assertEqual({r['path'] for r in short['results']}, {"bride.mp4"})
+        self.assertIn("couple.mp4", {r['path'] for r in all_brides['results']})
+
+    def test_index_refresh_invalidates_cached_results(self):
+        self.search("bride")
+        self.engine.db.get_video_metadata = lambda path: {"summary": "groom"}
+        self.engine.build_index(["couple.mp4"])
+        result = self.search("bride")
+        self.assertFalse(result['cached'])
+        self.assertNotIn("couple.mp4", {r['path'] for r in result['results']})
+
+    def test_cleared_metadata_is_removed_from_search_cache(self):
+        self.engine.db.get_video_metadata = lambda path: {}
+        self.engine.build_index(["bride.mp4"])
+        self.assertNotIn("bride.mp4", self.engine.cache)
+
+    def test_temporal_search_rejects_unrelated_second_scene(self):
+        collection = self.engine.db.temporal_sequences = FakeCollection()
+        self.engine._get_query_embedding = lambda query: [2.0]
+        responses = iter([
+            {"ids": [["a"]], "metadatas": [[{"source": "wedding.mp4", "start_time": 0, "end_time": 5}]], "distances": [[0.1]]},
+            {"ids": [["b"]], "metadatas": [[{"source": "wedding.mp4", "start_time": 6, "end_time": 9}]], "distances": [[0.9]]},
+        ])
+        collection.query = lambda **kwargs: next(responses)
+        result = self.engine._search_temporal_sequence([1.0], "walking", "dancing")
+        self.assertFalse(any(result.values()))
+
+    def test_after_queries_reverse_the_action_order(self):
+        seen = []
+        self.engine._get_query_embedding = lambda query: [1.0]
+        self.engine._search_temporal_sequence = lambda vector, a, b: seen.append((a, b)) or {}
+        self.search("dancing after walking")
+        self.assertEqual(seen, [("walking", "dancing")])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -6,6 +6,7 @@ import os
 import sys
 import subprocess
 import re
+import hashlib
 from pathlib import Path
 from core.logger import get_logger
 
@@ -53,7 +54,10 @@ def _safe_stem(video_path: str) -> str:
     """Return a filesystem-safe stem derived from the video filename."""
     stem = Path(video_path).stem
     # Replace anything that isn't alphanumeric, hyphen, underscore, or dot
-    return re.sub(r'[^\w\-.]', '_', stem)
+    safe_stem = re.sub(r'[^\w\-.]', '_', stem)[:100]
+    identity = os.path.normcase(os.path.abspath(video_path))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    return f"{safe_stem}_{digest}"
 
 
 # ─── Public API ──────────────────────────────────────────────────────

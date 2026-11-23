@@ -14,6 +14,8 @@ from core.logger import get_logger
 from core.performance import get_optimal_batch_size, log_memory_usage
 from core.proxy_generator import generate_thumbnail, generate_proxy, check_ffmpeg_available
 from collections import defaultdict
+from core.source_state import source_signature
+from core.clip_features import as_clip_tensor
 
 logger = get_logger(__name__)
 
@@ -28,6 +30,7 @@ class IndexerWorker(QThread):
         self.file_paths = file_paths
         self.project_path = project_path
         self.is_running = True
+        self.errors = []
         self.mode = mode  # "speed" or "accuracy"
 
         # --- Per-project settings (with robust parsing) ---
@@ -114,6 +117,16 @@ class IndexerWorker(QThread):
         return pil_img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     def run(self):
+        try:
+            self._run_indexing()
+        except Exception as exc:
+            self.errors.append(str(exc))
+            logger.exception("Visual indexing failed")
+            self.log_signal.emit(f"CRITICAL: Visual indexing failed - {exc}")
+        finally:
+            self.finished_signal.emit()
+
+    def _run_indexing(self):
         logger.debug(f"IndexerWorker.run() started (mode={self.mode})")
         self.progress_signal.emit(1)
         self.log_signal.emit("Initializing Smart-Action AI (Blur-Gate Enabled)...")
@@ -142,8 +155,8 @@ class IndexerWorker(QThread):
             except Exception as yolo_err:
                 self.log_signal.emit(f"YOLOv8 unavailable ({yolo_err}), using CLIP fallback for objects")
         except Exception as e:
+            self.errors.append(str(e))
             self.log_signal.emit(f"CRITICAL: AI Load Error - {e}")
-            self.finished_signal.emit()
             return
             
         tag_list = get_tag_bank()
@@ -156,6 +169,8 @@ class IndexerWorker(QThread):
             if not self.is_running: break
             
             filename = os.path.basename(video_path)
+            signature = source_signature(video_path)
+            file_error_count = len(self.errors)
             self.log_signal.emit(f"Processing {idx + 1}/{total_files}: {filename}")
             self.log_signal.emit(f"  → Starting deep visual analysis...")
             
@@ -165,12 +180,16 @@ class IndexerWorker(QThread):
             
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
+                self.errors.append(f"Cannot open video: {filename}")
                 self.log_signal.emit(f"  ✗ Failed to open video file")
                 continue
             
             fps = cap.get(cv2.CAP_PROP_FPS)
             if fps <= 0: fps = 24.0
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            db.clear_metadata_keys(video_path, ["visual_source_signature"])
+            db.clear_visual_embeddings(video_path)
+            db.update_metadata_key(video_path, "duration", total_frames / fps)
             
             # --- SCENE CONTAINER ---
             detected_scenes = []
@@ -366,7 +385,7 @@ class IndexerWorker(QThread):
                                 # Use scene frame as sequence representation
                                 inputs = clip_processor(images=scene['best_frame'], return_tensors="pt", padding=True).to(ai.device)
                                 with torch.no_grad():
-                                    seq_embedding = clip_model.get_image_features(**inputs)
+                                    seq_embedding = as_clip_tensor(clip_model.get_image_features(**inputs))
                                     seq_embedding /= seq_embedding.norm(p=2, dim=-1, keepdim=True)
                                     seq_embedding = seq_embedding.cpu().numpy()[0].tolist()
                                 
@@ -632,7 +651,7 @@ class IndexerWorker(QThread):
                         if scene.get('best_frame'):
                             inputs = clip_processor(images=scene['best_frame'], return_tensors="pt", padding=True).to(ai.device)
                             with torch.no_grad():
-                                frame_features = clip_model.get_image_features(**inputs)
+                                frame_features = as_clip_tensor(clip_model.get_image_features(**inputs))
                                 frame_features /= frame_features.norm(p=2, dim=-1, keepdim=True)
                                 scene_embeddings.append(frame_features.cpu().numpy()[0])
                     
@@ -644,9 +663,9 @@ class IndexerWorker(QThread):
                         # Check tag relevance
                         semantically_relevant = []
                         tag_texts = list(candidate_tags)
-                        inputs = clip_processor(text=tag_texts, return_tensors="pt", padding=True).to(ai.device)
+                        inputs = clip_processor(text=tag_texts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
                         with torch.no_grad():
-                            tag_features = clip_model.get_text_features(**inputs)
+                            tag_features = as_clip_tensor(clip_model.get_text_features(**inputs))
                             tag_features /= tag_features.norm(p=2, dim=-1, keepdim=True)
                             
                             for i, tag in enumerate(candidate_tags):
@@ -671,9 +690,9 @@ class IndexerWorker(QThread):
                     # Get embeddings for all candidate tags
                     tag_embeddings = {}
                     tag_texts = list(candidate_tags)
-                    inputs = clip_processor(text=tag_texts, return_tensors="pt", padding=True).to(ai.device)
+                    inputs = clip_processor(text=tag_texts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
                     with torch.no_grad():
-                        text_features = clip_model.get_text_features(**inputs)
+                        text_features = as_clip_tensor(clip_model.get_text_features(**inputs))
                         text_features /= text_features.norm(p=2, dim=-1, keepdim=True)
                         for i, tag in enumerate(candidate_tags):
                             tag_embeddings[tag] = text_features[i].cpu().numpy()
@@ -852,12 +871,12 @@ class IndexerWorker(QThread):
                         # Process frame for CLIP
                         inputs = clip_processor(images=best_scene_frame, return_tensors="pt", padding=True).to(ai.device)
                         with torch.no_grad():
-                            frame_features = clip_model.get_image_features(**inputs)
+                            frame_features = as_clip_tensor(clip_model.get_image_features(**inputs))
                             frame_features /= frame_features.norm(p=2, dim=-1, keepdim=True)
                             
                             # Encode shot type tags
-                            shot_inputs = clip_processor(text=shot_type_tags, return_tensors="pt", padding=True).to(ai.device)
-                            shot_text_features = clip_model.get_text_features(**shot_inputs)
+                            shot_inputs = clip_processor(text=shot_type_tags, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
+                            shot_text_features = as_clip_tensor(clip_model.get_text_features(**shot_inputs))
                             shot_text_features /= shot_text_features.norm(p=2, dim=-1, keepdim=True)
                             
                             # Calculate similarity
@@ -923,12 +942,12 @@ class IndexerWorker(QThread):
                         for frame in sample_frames:
                             inputs = clip_processor(images=frame, return_tensors="pt", padding=True).to(ai.device)
                             with torch.no_grad():
-                                frame_features = clip_model.get_image_features(**inputs)
+                                frame_features = as_clip_tensor(clip_model.get_image_features(**inputs))
                                 frame_features /= frame_features.norm(p=2, dim=-1, keepdim=True)
                                 
                                 # Check emotions
-                                emotion_inputs = clip_processor(text=emotion_prompts, return_tensors="pt", padding=True).to(ai.device)
-                                emotion_text_features = clip_model.get_text_features(**emotion_inputs)
+                                emotion_inputs = clip_processor(text=emotion_prompts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
+                                emotion_text_features = as_clip_tensor(clip_model.get_text_features(**emotion_inputs))
                                 emotion_text_features /= emotion_text_features.norm(p=2, dim=-1, keepdim=True)
                                 emotion_similarities = (frame_features @ emotion_text_features.T).cpu().numpy()[0]
                                 
@@ -941,8 +960,8 @@ class IndexerWorker(QThread):
                                         detected_emotions.append(emotion_name)
                                 
                                 # Check objects
-                                object_inputs = clip_processor(text=object_prompts, return_tensors="pt", padding=True).to(ai.device)
-                                object_text_features = clip_model.get_text_features(**object_inputs)
+                                object_inputs = clip_processor(text=object_prompts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
+                                object_text_features = as_clip_tensor(clip_model.get_text_features(**object_inputs))
                                 object_text_features /= object_text_features.norm(p=2, dim=-1, keepdim=True)
                                 object_similarities = (frame_features @ object_text_features.T).cpu().numpy()[0]
                                 
@@ -1023,6 +1042,8 @@ class IndexerWorker(QThread):
                     self.log_signal.emit(f"  → Proxy generated")
 
             # Update last_scanned timestamp for incremental indexing
+            if self.is_running and signature is not None and len(self.errors) == file_error_count:
+                db.update_metadata_key(video_path, "visual_source_signature", signature)
             try:
                 file_mtime = os.path.getmtime(video_path)
                 db.update_metadata_key(video_path, "last_scanned", file_mtime)
@@ -1042,13 +1063,12 @@ class IndexerWorker(QThread):
             raise
         self.progress_signal.emit(100)
         logger.debug("Indexing complete, emitting finished signal")
-        self.finished_signal.emit()
 
     def process_batch(self, images, timestamps, ai, db, video_path, model, processor, tag_list, tag_scores, tag_frame_occurrences=None, start_frame_idx=None):
         try:
             inputs = processor(images=images, return_tensors="pt", padding=True).to(ai.device)
             with torch.no_grad():
-                img_features = model.get_image_features(**inputs)
+                img_features = as_clip_tensor(model.get_image_features(**inputs))
                 img_features /= img_features.norm(p=2, dim=-1, keepdim=True)
                 
                 # OPTIMIZATION: Batch database writes instead of immediate writes
@@ -1134,6 +1154,7 @@ class IndexerWorker(QThread):
                                 # Track co-occurrences
                                 tag_cooccurrences[tag1].add(tag2)
         except Exception as e:
+            self.errors.append(f"Embedding batch failed: {e}")
             print(f"Batch Error: {e}")
 
     def _flush_db_batch(self, db, video_path):

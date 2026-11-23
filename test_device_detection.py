@@ -10,6 +10,7 @@ Usage:
 import sys
 import time
 import torch
+from core.clip_features import as_clip_tensor
 import numpy as np
 from PIL import Image
 
@@ -129,7 +130,7 @@ try:
     test_img = make_test_image()
     inputs = clip_processor(images=test_img, return_tensors="pt", padding=True).to(device)
     with torch.no_grad():
-        features = clip_model.get_image_features(**inputs)
+        features = as_clip_tensor(clip_model.get_image_features(**inputs))
         features /= features.norm(p=2, dim=-1, keepdim=True)
 
     embedding = features.cpu().numpy()[0]
@@ -138,9 +139,9 @@ try:
 
     # Test text inference
     texts = ["a green rectangle", "a photo of a dog", "a blue gradient"]
-    text_inputs = clip_processor(text=texts, return_tensors="pt", padding=True).to(device)
+    text_inputs = clip_processor(text=texts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(device)
     with torch.no_grad():
-        text_features = clip_model.get_text_features(**text_inputs)
+        text_features = as_clip_tensor(clip_model.get_text_features(**text_inputs))
         text_features /= text_features.norm(p=2, dim=-1, keepdim=True)
         similarities = (features @ text_features.T).cpu().numpy()[0]
 

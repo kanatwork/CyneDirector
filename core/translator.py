@@ -544,25 +544,9 @@ def split_into_sentences(text: str) -> List[str]:
     # Clean up text first
     text = re.sub(r'\s+', ' ', text.strip())
     
-    # Split on sentence-ending punctuation followed by space or end of string
-    # Pattern: period, exclamation, or question mark followed by space or end
-    sentence_endings = r'[.!?]+(?:\s+|$)'
-    sentences = re.split(sentence_endings, text)
-    
-    # Clean and filter sentences
-    cleaned_sentences = []
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if sentence:
-            # Ensure proper capitalization
-            if sentence and not sentence[0].isupper():
-                sentence = sentence[0].upper() + sentence[1:] if len(sentence) > 1 else sentence.upper()
-            # Ensure sentence ends with punctuation
-            if sentence and sentence[-1] not in '.!?':
-                sentence += '.'
-            cleaned_sentences.append(sentence)
-    
-    return cleaned_sentences if cleaned_sentences else [text]
+    # Keep the speaker's punctuation and casing, including questions and Hindi
+    # sentence terminators. Splitting must not rewrite the spoken words.
+    return [part.strip() for part in re.split(r'(?<=[.!?।॥])\s+', text) if part.strip()]
 
 
 def merge_transcript_segments(segments: List[Dict]) -> str:
@@ -695,10 +679,6 @@ def split_segments_into_sentences(segments: List[Dict]) -> List[Dict]:
                     seg_end = seg_start + (seg_duration * sentence_ratio)
                 else:
                     seg_end = seg_start + duration_per_sentence
-            
-            # Ensure minimum duration of 0.5 seconds
-            if seg_end - seg_start < 0.5:
-                seg_end = seg_start + 0.5
             
             sentence_segments.append({
                 'start': seg_start,

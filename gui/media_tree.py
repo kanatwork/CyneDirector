@@ -667,7 +667,7 @@ class MediaTree(QTreeWidget):
         """Handle mouse move for hover tooltip."""
         item = self.itemAt(event.pos())
         if item and item.childCount() == 0:  # Only for files
-            file_path = item.text(9)
+            file_path = item.text(10)
             if file_path and file_path in self.thumbnail_delegate.thumbnails:
                 if item != self._hover_item:
                     self._hover_item = item
@@ -960,12 +960,13 @@ class MediaTree(QTreeWidget):
                 file_item.setText(4, "...")  # DUR
                 file_item.setText(5, "⬜")  # Visuals
                 file_item.setText(6, "⬜")  # Audio
-                file_item.setText(7, "--")  # Shot type
-                file_item.setText(8, "Waiting for scan...")  # Summary
+                file_item.setText(7, "⬜")  # Translation
+                file_item.setText(8, "--")  # Shot type
+                file_item.setText(9, "Waiting for scan...")  # Summary
                 file_item.setText(10, path)  # Full path (column 10)
                 
                 # Set explicit foreground colors for all text columns to ensure visibility
-                for col in [0, 2, 3, 4, 7, 8]:  # Updated column numbers (0 is filename now)
+                for col in [0, 2, 3, 4, 7, 8, 9]:
                     file_item.setForeground(col, QBrush(QColor(COLORS['text_main'])))
                 
                 # Load thumbnail for this file
@@ -1172,10 +1173,29 @@ class MediaTree(QTreeWidget):
         else:
             # Not fully indexed - remove highlighting
             transparent = QColor(0, 0, 0, 0)  # Transparent
-            for col in range(9):
+            for col in range(10):
                 item.setBackground(col, QBrush(transparent))
 
     # --- EXTERNAL UPDATES (OPTIMIZED LOOKUP) ---
+    def update_file_status(self, file_path):
+        """Refresh saved processing status without starting metadata workers."""
+        item = self.item_map.get(self.norm(file_path))
+        if item is None:
+            return
+        from core.database import Database
+        metadata = Database().get_video_metadata(file_path)
+        for column, key in ((5, "tags"), (6, "transcript"), (7, "transcript_translated")):
+            self._set_status_icon(item, column, bool(metadata.get(key)))
+        item.setText(8, metadata.get("shot_type") or "--")
+        item.setText(9, metadata.get("summary") or "")
+        self._update_integration_tooltip(item)
+        self._update_item_highlighting(item)
+
+    def refresh_all_statuses(self):
+        """Refresh every file, including files inside nested folders."""
+        for item in self.item_map.values():
+            self.update_file_status(item.text(10))
+
     def set_processing_icon(self, file_path, data_type):
         col_map = {'visuals': 5, 'audio': 6, 'translation': 7}
         if data_type in col_map:
@@ -1224,7 +1244,7 @@ class MediaTree(QTreeWidget):
             item.setForeground(column_index, QBrush(QColor(COLORS['border'])))
         
         if summary_text is not None:
-            item.setText(8, summary_text)  # AI Summary is column 8 (unchanged)
+            item.setText(9, summary_text)
         
         # Update integration tooltip when status changes
         self._update_integration_tooltip(item)

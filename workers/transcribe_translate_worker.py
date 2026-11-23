@@ -13,6 +13,7 @@ from core.translator import (
 )
 from core.logger import get_logger
 from core.settings_manager import get_whisper_language_hint
+from core.source_state import source_signature, needs_processing
 
 logger = get_logger(__name__)
 
@@ -71,7 +72,7 @@ class TranscribeTranslateWorker(QThread):
                 transcript = meta.get("transcript", [])
                 
                 # Transcribe if needed
-                if not transcript or not isinstance(transcript, list) or len(transcript) == 0:
+                if not isinstance(transcript, list) or not transcript or needs_processing(self.video_path, meta, "transcript"):
                     self.log_signal.emit("Transcribing audio in original language...")
                     original_segments = self._transcribe_audio(ai, db)
                     if not original_segments:
@@ -188,6 +189,9 @@ class TranscribeTranslateWorker(QThread):
                 db.update_metadata_key(self.video_path, "translation_method", translation_method)
                 import time
                 db.update_metadata_key(self.video_path, "translation_timestamp", time.time())
+                signature = db.get_video_metadata(self.video_path).get("transcript_source_signature")
+                if signature is not None:
+                    db.update_metadata_key(self.video_path, "translation_source_signature", signature)
                 
                 self.log_signal.emit(f"Translation complete! Method: {translation_method}, Segments: {len(formatted_segments)}")
                 
@@ -208,6 +212,7 @@ class TranscribeTranslateWorker(QThread):
     def _transcribe_audio(self, ai: AIBackend, db: Database) -> list:
         """Transcribe audio if not already done."""
         try:
+            signature = source_signature(self.video_path)
             self.log_signal.emit("Loading Whisper model...")
             
             if self.mode == "accuracy":
@@ -271,7 +276,7 @@ class TranscribeTranslateWorker(QThread):
             
             # Save transcript to database
             if segment_list:
-                db.save_transcript(self.video_path, segment_list)
+                db.save_transcript(self.video_path, segment_list, source_signature=signature)
                 self.log_signal.emit(f"Saved {len(segment_list)} transcript segments")
             
             return segment_list

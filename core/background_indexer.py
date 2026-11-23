@@ -5,6 +5,7 @@ import time
 from collections import deque
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer
 from core.database import Database
+from core.source_state import needs_processing
 
 class BackgroundIndexer(QObject):
     """
@@ -26,6 +27,7 @@ class BackgroundIndexer(QObject):
         self.index_queue = deque()
         self.is_indexing = False
         self.current_worker = None
+        self.can_process = lambda: True
         
         # Track indexed files to avoid duplicates
         self.indexed_files = set()
@@ -76,11 +78,7 @@ class BackgroundIndexer(QObject):
             # Check if file was modified since last index
             try:
                 meta = self.db.get_video_metadata(video_path)
-                last_scanned = meta.get('last_scanned', 0)
-                file_mtime = os.path.getmtime(video_path)
-                
-                # Only re-index if file was modified after last scan
-                if file_mtime <= last_scanned:
+                if not needs_processing(video_path, meta, "visual"):
                     return
             except:
                 pass
@@ -120,7 +118,7 @@ class BackgroundIndexer(QObject):
     
     def process_queue(self):
         """Process next item in indexing queue."""
-        if self.is_indexing or not self.index_queue:
+        if self.is_indexing or not self.index_queue or not self.can_process():
             return
         
         # Get highest priority item
@@ -148,7 +146,7 @@ class BackgroundIndexer(QObject):
         self.current_worker.progress_signal.connect(
             lambda p: self.indexing_progress.emit(f"Indexing {os.path.basename(video_path)}", p)
         )
-        self.current_worker.finished_signal.connect(self._on_file_indexed)
+        self.current_worker.finished.connect(self._on_file_indexed)
         self.current_worker.log_signal.connect(
             lambda msg: self.indexing_progress.emit(msg, -1)  # -1 = indeterminate progress
         )
@@ -158,10 +156,12 @@ class BackgroundIndexer(QObject):
         """Handle completion of file indexing."""
         if self.current_worker:
             # Get the file that was indexed
-            if hasattr(self.current_worker, 'file_paths') and self.current_worker.file_paths:
+            if (not self.current_worker.errors and self.current_worker.is_running
+                    and self.current_worker.file_paths):
                 video_path = self.current_worker.file_paths[0]
                 self.indexed_files.add(video_path)
                 self.file_indexed.emit(video_path)
+            self.current_worker.deleteLater()
         
         self.current_worker = None
         self.is_indexing = False
@@ -201,10 +201,7 @@ class BackgroundIndexer(QObject):
                         # Check if modified
                         try:
                             meta = self.db.get_video_metadata(video_path)
-                            last_scanned = meta.get('last_scanned', 0)
-                            file_mtime = os.path.getmtime(video_path)
-                            
-                            if file_mtime > last_scanned:
+                            if needs_processing(video_path, meta, "visual"):
                                 new_files.append(video_path)
                         except:
                             # If metadata doesn't exist, re-index

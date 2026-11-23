@@ -3,6 +3,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from enum import Enum
 from typing import List, Dict, Optional
 from core.database import Database
+from core.source_state import needs_processing
 
 class OperationType(Enum):
     INDEX_VISUALS = "index_visuals"
@@ -124,31 +125,25 @@ class WorkflowManager(QObject):
                 
             meta = self.db.get_video_metadata(path)
             
-            # Check if file was modified since last scan
-            try:
-                file_mtime = os.path.getmtime(path)
-                last_scanned = meta.get('last_scanned', 0)
-                file_modified = file_mtime > last_scanned if last_scanned > 0 else True
-            except OSError:
-                file_modified = True  # If we can't get mtime, assume modified
-            
             if op_type == OperationType.INDEX_VISUALS:
                 # Need indexing if: no tags OR file was modified since last scan
-                if not meta.get('tags') or file_modified:
+                if not meta.get('tags') or needs_processing(path, meta, "visual"):
                     filtered.append(path)
             elif op_type == OperationType.TRANSCRIBE_AUDIO:
                 # Need transcription if: no transcript OR file was modified since last scan
-                if not meta.get('transcript') or file_modified:
+                if not meta.get('transcript') or needs_processing(path, meta, "transcript"):
                     filtered.append(path)
             elif op_type == OperationType.TRANSLATE_AUDIO:
                 # Need translation if: has transcript but no translation OR file was modified since last translation
                 has_transcript = bool(meta.get('transcript'))
                 has_translation = bool(meta.get('transcript_translated'))
-                # Check if translation was done after last file modification
-                translation_timestamp = meta.get('translation_timestamp', 0)
-                translation_outdated = file_mtime > translation_timestamp if translation_timestamp > 0 else True
-                
-                if has_transcript and (not has_translation or translation_outdated):
+                pending_transcription = any(
+                    op.op_type == OperationType.TRANSCRIBE_AUDIO
+                    and op.status in (OperationStatus.PENDING, OperationStatus.RUNNING)
+                    and path in op.file_paths for op in self.queue
+                )
+                translation_outdated = needs_processing(path, meta, "translation")
+                if pending_transcription or (has_transcript and (not has_translation or translation_outdated)):
                     filtered.append(path)
         
         return filtered
@@ -234,6 +229,8 @@ class WorkflowManager(QObject):
                 # If workflow is running and this was the current operation, continue
                 if self.is_running and op == self.current_operation:
                     self._process_next()
+                elif self.is_running and self.current_operation is None:
+                    self._process_next()
                 return True
         return False
     
@@ -280,9 +277,8 @@ class WorkflowManager(QObject):
             self.is_paused = False
             self.workflow_resumed.emit()
             # Continue processing
-            if self.current_operation:
-                # Signal the worker to continue (workers handle pause internally)
-                pass
+            if self.current_operation is None:
+                self._process_next()
     
     def cancel_workflow(self):
         """Cancel the current workflow and clear queue."""
@@ -297,6 +293,8 @@ class WorkflowManager(QObject):
         """Process the next operation in the queue."""
         if not self.is_running or self.is_paused:
             return
+        if self.current_operation is not None:
+            return
         
         # Find next pending operation (skip paused ones)
         next_op = None
@@ -306,6 +304,8 @@ class WorkflowManager(QObject):
                 break
         
         if not next_op:
+            if any(op.status == OperationStatus.PENDING for op in self.queue):
+                return  # Pending jobs are paused; do not declare completion.
             # No more operations
             self.is_running = False
             self.workflow_finished.emit()
@@ -347,44 +347,7 @@ class WorkflowManager(QObject):
         Uses incremental indexing: checks file modification times.
         Useful for UI to show what operations are needed.
         """
-        import os
-        result = {
-            OperationType.INDEX_VISUALS: [],
-            OperationType.TRANSCRIBE_AUDIO: [],
-            OperationType.TRANSLATE_AUDIO: []
-        }
-        
-        for path in file_paths:
-            if not os.path.exists(path):
-                continue
-                
-            meta = self.db.get_video_metadata(path)
-            
-            # Check if file was modified since last scan
-            try:
-                file_mtime = os.path.getmtime(path)
-                last_scanned = meta.get('last_scanned', 0)
-                file_modified = file_mtime > last_scanned if last_scanned > 0 else True
-            except OSError:
-                file_modified = True  # If we can't get mtime, assume modified
-            
-            # Need indexing if: no tags OR file was modified
-            if not meta.get('tags') or file_modified:
-                result[OperationType.INDEX_VISUALS].append(path)
-            
-            # Need transcription if: no transcript OR file was modified
-            if not meta.get('transcript') or file_modified:
-                result[OperationType.TRANSCRIBE_AUDIO].append(path)
-            
-            # Need translation if: has transcript but no translation OR translation is outdated
-            has_transcript = bool(meta.get('transcript'))
-            has_translation = bool(meta.get('transcript_translated'))
-            translation_timestamp = meta.get('translation_timestamp', 0)
-            translation_outdated = file_mtime > translation_timestamp if translation_timestamp > 0 else True
-            
-            if has_transcript and (not has_translation or translation_outdated):
-                result[OperationType.TRANSLATE_AUDIO].append(path)
-        
-        return result
+        return {op_type: self._filter_files_needing_operation(op_type, file_paths)
+                for op_type in OperationType}
 
 

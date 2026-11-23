@@ -51,6 +51,8 @@ class MainWindow(QMainWindow):
         # Background indexing
         from core.background_indexer import BackgroundIndexer
         self.background_indexer = BackgroundIndexer(self.project_path)
+        self.background_indexer.can_process = lambda: (
+            self.worker is None and not self.workflow_manager.is_running)
         self.background_indexer.indexing_progress.connect(self.on_background_indexing_progress)
         self.background_indexer.file_indexed.connect(self.on_file_indexed)
         self.background_indexer.indexing_finished.connect(self.on_background_indexing_finished) 
@@ -728,6 +730,9 @@ class MainWindow(QMainWindow):
             status_icons = []
             try:
                 data = self.db.get_video_metadata(fpath)
+                saved_thumbnail = data.get("thumbnail_path")
+                if saved_thumbnail and os.path.isfile(saved_thumbnail):
+                    thumb_path = saved_thumbnail
                 if data.get("tags"):
                     status_icons.append(("\U0001f4f7", COLORS['success']))  # indexed
                 if data.get("transcript"):
@@ -1182,7 +1187,7 @@ class MainWindow(QMainWindow):
         operation_order = [OperationType.INDEX_VISUALS, OperationType.TRANSCRIBE_AUDIO, OperationType.TRANSLATE_AUDIO]
         for op_type in operation_order:
             if op_type in needed_ops:
-                op_files = needed_ops[op_type]
+                op_files = self.workflow_manager.get_files_needing_operations(files)[op_type]
                 if op_files and self.workflow_manager.add_operation(op_type, op_files, smart_filter=False):
                     added_count += 1
         
@@ -1451,6 +1456,12 @@ class MainWindow(QMainWindow):
     
     def start_workflow(self):
         """Start processing the workflow queue."""
+        if self.background_indexer.is_indexing:
+            self.toast_manager.show_toast("Background analysis is running. Start the queue when it finishes.", "info")
+            return
+        if self.worker is not None:
+            self.toast_manager.show_toast("An operation is still finishing. Please try again shortly.", "info")
+            return
         if not self.workflow_manager.queue:
             self.toast_manager.show_toast("No operations in the workflow queue.", "warning")
             return
@@ -1556,7 +1567,11 @@ class MainWindow(QMainWindow):
     
     def on_workflow_finished(self):
         """Called when workflow completes."""
-        self.activity_log.log_success("Workflow completed", timestamp=True)
+        failed = any(op.status == OperationStatus.FAILED for op in self.workflow_manager.queue)
+        if failed:
+            self.activity_log.log_error("Workflow finished with failed operations", timestamp=True)
+        else:
+            self.activity_log.log_success("Workflow completed", timestamp=True)
         self.btn_start_workflow.setEnabled(True)
         self.btn_cancel.hide()
         self.btn_pause_workflow.hide()
@@ -1568,7 +1583,9 @@ class MainWindow(QMainWindow):
         self.update_workflow_queue_display()
         self._update_start_button_visibility()
         self.mark_dirty()
-        self.toast_manager.show_toast("Workflow completed successfully", "success")
+        self.toast_manager.show_toast(
+            "Workflow finished with failed operations" if failed else "Workflow completed successfully",
+            "error" if failed else "success")
 
         # Stop progress glow
         if hasattr(self, '_progress_glow_anim') and self._progress_glow_anim:
@@ -1590,7 +1607,8 @@ class MainWindow(QMainWindow):
         self._success_check.setParent(self.status_bar)
         self._success_check.move(self.progress_bar.x() + self.progress_bar.width() + 8,
                                   self.progress_bar.y() - 2)
-        self._success_check.show()
+        if not failed:
+            self._success_check.show()
         self._success_check_anim = scale_bounce(self._success_check, duration=300)
         QTimer.singleShot(1500, self._remove_success_check)
         
@@ -1605,15 +1623,6 @@ class MainWindow(QMainWindow):
 
     def _refresh_tree_highlighting(self):
         """Refresh highlighting for all tree items."""
-        root = self.tree.invisibleRootItem()
-        for i in range(root.childCount()):
-            folder = root.child(i)
-            for j in range(folder.childCount()):
-                item = folder.child(j)
-                if hasattr(self.tree, '_update_item_highlighting'):
-                    self.tree._update_item_highlighting(item)
-        
-        # Refresh tree to update highlighting
         self.tree.refresh_all_statuses()
     
     def on_workflow_operation_started(self, op_type: OperationType, file_paths: list):
@@ -2195,12 +2204,19 @@ class MainWindow(QMainWindow):
         confirm = QMessageBox.question(self, "Confirm Clear", f"Are you sure you want to clear {data_type} data for {len(files)} files?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if confirm == QMessageBox.StandardButton.No: return
         
-        keys_map = {'visuals': ['tags', 'summary'], 'audio': ['transcript', 'summary']}
+        keys_map = {
+            'visuals': ['tags', 'summary', 'visual_source_signature', 'visual_descriptions_temp',
+                        'objects_yolo', 'objects', 'emotions', 'shot_type', 'scene_segments'],
+            'audio': ['transcript', 'summary', 'transcript_source_signature', 'transcript_language',
+                      'transcription_gaps', 'transcript_translated', 'translation_source_signature',
+                      'translation_timestamp', 'translation_method'],
+        }
         keys = keys_map.get(data_type, [])
         for fpath in files:
             self.db.clear_metadata_keys(fpath, keys)
             self.tree.reset_status(fpath, data_type)
             
+        self.search_tab.engine.build_index(files)
         self.update_preview_panel()
         self.status_label.setText(f"Cleared {data_type} for {len(files)} files.")
 
@@ -2332,34 +2348,41 @@ class MainWindow(QMainWindow):
             self.worker.stop()
 
     def worker_finished(self):
+        # Detach the completed thread before notifying the queue: that notification
+        # can synchronously start the next worker and assign self.worker again.
+        completed_worker = self.worker
+        self.worker = None
+        errors = list(getattr(completed_worker, "errors", []))
+        errors.extend(getattr(self, "translation_errors", []))
+        cancelled = completed_worker is not None and not completed_worker.is_running
+        success = not errors and not cancelled
+        error_msg = "; ".join(errors) or ("Cancelled" if cancelled else "")
+        if completed_worker is not None:
+            completed_worker.deleteLater()
         self.lock_buttons(False)
         self.progress_bar.hide()
-        current_text = self.status_label.text()
-        if "CRITICAL" not in current_text and "Error" not in current_text:
+        if success:
             self.status_label.setText("Task Complete")
             self.status_icon.setStyleSheet(f"color: {COLORS['success']}; font-size: 10px;")
         else:
+            self.status_label.setText(error_msg or "Task failed")
             self.status_icon.setStyleSheet(f"color: {COLORS['error']}; font-size: 10px;")
         self.mark_dirty()
         
         # Update search index with any new metadata found
-        files_processed = self.get_files_to_process() # This is approximate, but safe
+        files_processed = getattr(completed_worker, "file_paths", None)
+        if files_processed is None:
+            files_processed = getattr(self, "translation_files", [])
         if files_processed:
             self.search_tab.engine.build_index(files_processed)
         
-        # Notify workflow manager if operation is running
+        self.translation_errors = []
+        self.update_preview_panel()
+
+        # This must be last: the signal may launch the next operation immediately.
         if hasattr(self, 'workflow_manager') and self.workflow_manager.current_operation:
             op_type = self.workflow_manager.current_operation.op_type
-            success = "CRITICAL" not in current_text and "Error" not in current_text
-            error_msg = current_text if not success else None
             self.workflow_manager.on_operation_finished(op_type, success, error_msg)
-        
-        # Wait for thread to finish before deleting
-        if self.worker and self.worker.isRunning():
-            self.worker.wait(5000)  # Wait up to 5 seconds
-        
-        self.worker = None
-        self.update_preview_panel()
 
     def on_background_indexing_progress(self, message, percent):
         """Handle background indexing progress updates."""
@@ -2540,32 +2563,41 @@ class MainWindow(QMainWindow):
     def _start_indexer_worker(self, files):
         """Start indexer worker (used by workflow manager)."""
         if self.worker and self.worker.isRunning(): return
+        if self.background_indexer.is_indexing:
+            self.toast_manager.show_toast("Background analysis is running. Please wait for it to finish.", "info")
+            return
         
         from workers.indexer import IndexerWorker
         mode = getattr(self.workflow_manager, 'current_mode', 'speed')
         self.worker = IndexerWorker(files, self.project_path, mode=mode)
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.log_signal.connect(self.update_log_status)
-        self.worker.finished_signal.connect(self.worker_finished)
+        self.worker.finished.connect(self.worker_finished)
         self.worker.summary_signal.connect(self.update_visuals_status)
         self.worker.start()
     
     def _start_transcriber_worker(self, files):
         """Start transcriber worker (used by workflow manager)."""
         if self.worker and self.worker.isRunning(): return
+        if self.background_indexer.is_indexing:
+            self.toast_manager.show_toast("Background analysis is running. Please wait for it to finish.", "info")
+            return
         
         from workers.transcriber import TranscriberWorker
         mode = getattr(self.workflow_manager, 'current_mode', 'speed')
         self.worker = TranscriberWorker(files, self.project_path, mode=mode)
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.log_signal.connect(self.update_log_status)
-        self.worker.finished_signal.connect(self.worker_finished)
+        self.worker.finished.connect(self.worker_finished)
         self.worker.file_finished_signal.connect(self.update_audio_status)
         self.worker.start()
     
     def _start_translate_worker(self, files):
         """Start translation worker (used by workflow manager)."""
         if self.worker and self.worker.isRunning(): return
+        if self.background_indexer.is_indexing:
+            self.toast_manager.show_toast("Background analysis is running. Please wait for it to finish.", "info")
+            return
         
         from workers.transcribe_translate_worker import TranscribeTranslateWorker
         from config import DEEPL_API_KEY
@@ -2575,6 +2607,7 @@ class MainWindow(QMainWindow):
         # Store files list for batch processing
         if files:
             self.translation_files = files
+            self.translation_errors = []
             self.current_translation_index = 0
             self._process_next_translation_file()
     
@@ -2615,9 +2648,17 @@ class MainWindow(QMainWindow):
         self.worker.progress_signal.connect(update_batch_progress)
         self.worker.log_signal.connect(self.update_log_status)
         # Connect finished to process next file instead of worker_finished
-        self.worker.finished_signal.connect(self.on_translation_file_finished)
+        self.worker.finished_signal.connect(self._record_translation_result)
+        self.worker.finished.connect(self._on_translation_thread_finished)
+        self._translation_result = (False, "Translation worker exited without a result")
         self.worker.translation_complete_signal.connect(self.on_translation_complete)
         self.worker.start()
+
+    def _record_translation_result(self, success, error_msg):
+        self._translation_result = (success, error_msg)
+
+    def _on_translation_thread_finished(self):
+        self.on_translation_file_finished(*self._translation_result)
     
     def on_translation_file_finished(self, success: bool, error_msg: str):
         """Handle completion of a single translation file, then process next."""
@@ -2626,6 +2667,8 @@ class MainWindow(QMainWindow):
             if success:
                 self.tree.mark_translation_done(file_path)
                 self.update_audio_status(file_path)  # Refresh status
+            else:
+                self.translation_errors.append(f"{os.path.basename(file_path)}: {error_msg}")
             self.current_translation_index += 1
             
             # Update progress
@@ -2634,7 +2677,11 @@ class MainWindow(QMainWindow):
             self.update_progress(progress)
             
             # Process next file
-            if self.current_translation_index < len(self.translation_files):
+            if not self.worker.is_running:
+                self.worker_finished()
+            elif self.current_translation_index < len(self.translation_files):
+                self.worker.deleteLater()
+                self.worker = None
                 self._process_next_translation_file()
             else:
                 # All files done

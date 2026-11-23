@@ -5,6 +5,7 @@ import os
 import gc
 import threading
 from core.logger import get_logger
+from core.clip_features import as_clip_tensor
 
 logger = get_logger(__name__)
 
@@ -24,15 +25,11 @@ def _detect_cuda_arch():
     major, minor = torch.cuda.get_device_capability(0)
     arch = f"{major}.{minor}"
 
-    # Known compute capabilities PyTorch can target.
-    # If the detected arch is newer than what PyTorch knows, fall back to the
-    # highest supported arch so the JIT compiler can still produce valid kernels.
-    supported = ["7.5", "8.0", "8.6", "8.9", "9.0"]
-    if arch not in supported:
-        # GPU is newer than anything in the list — use the highest known arch
-        arch = supported[-1]
-
-    os.environ["TORCH_CUDA_ARCH_LIST"] = arch
+    # Derive support from the installed wheel, including newer GPU families.
+    # Do not mislabel an unsupported Blackwell card as a Hopper card.
+    supported = torch.cuda.get_arch_list()
+    if f"sm_{major}{minor}" in supported or f"compute_{major}{minor}" in supported:
+        os.environ.setdefault("TORCH_CUDA_ARCH_LIST", arch)
 
 
 _detect_cuda_arch()
@@ -213,9 +210,9 @@ class AIBackend:
                 
                 for i in range(0, len(tags), batch_size):
                     batch_tags = tags[i:i+batch_size]
-                    inputs = self.clip_processor(text=batch_tags, return_tensors="pt", padding=True).to(self.device)
+                    inputs = self.clip_processor(text=batch_tags, return_tensors="pt", padding=True, truncation=True, max_length=77).to(self.device)
                     with torch.no_grad():
-                        batch_embeds = self.clip_model.get_text_features(**inputs)
+                        batch_embeds = as_clip_tensor(self.clip_model.get_text_features(**inputs))
                         batch_embeds /= batch_embeds.norm(p=2, dim=-1, keepdim=True)
                         tag_embeddings_list.append(batch_embeds)
                 

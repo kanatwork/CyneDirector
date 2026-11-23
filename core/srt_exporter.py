@@ -1,5 +1,8 @@
 # [FILE: core/srt_exporter.py]
 import os
+import hashlib
+import textwrap
+from collections import Counter
 from typing import List, Dict
 from core.translator import merge_transcript_segments, split_into_sentences, split_segments_into_sentences
 
@@ -13,68 +16,28 @@ class SRTExporter:
     @staticmethod
     def format_timestamp(seconds: float) -> str:
         """Convert seconds to SRT timestamp format (HH:MM:SS,mmm)."""
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        secs = int(seconds % 60)
-        millis = int((seconds % 1) * 1000)
+        total_millis = max(0, round(seconds * 1000))
+        hours, remainder = divmod(total_millis, 3600000)
+        minutes, remainder = divmod(remainder, 60000)
+        secs, millis = divmod(remainder, 1000)
         return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
     
     @staticmethod
     def _format_text_for_srt(text: str) -> str:
         """
         Format text for SRT according to standards.
-        Split long lines and ensure max 2 lines per subtitle.
+        Wrap every word; the exporter splits lines into two-line cues.
         
         Args:
             text: Text to format
         
         Returns:
-            Formatted text (max 2 lines, max 42 chars per line)
+            Wrapped text (max 42 chars per line), without discarding text
         """
-        text = text.strip()
-        if not text:
-            return ""
-        
-        # If text is short enough, return as-is
-        if len(text) <= SRTExporter.MAX_CHARS_PER_LINE:
-            return text
-        
-        # Split into words
-        words = text.split()
-        lines = []
-        current_line = ""
-        
-        for word in words:
-            # Check if adding this word would exceed line length
-            test_line = f"{current_line} {word}".strip() if current_line else word
-            
-            if len(test_line) <= SRTExporter.MAX_CHARS_PER_LINE:
-                current_line = test_line
-            else:
-                # Current line is full, start new line
-                if current_line:
-                    lines.append(current_line)
-                    current_line = word
-                else:
-                    # Single word is too long, split it
-                    if len(word) > SRTExporter.MAX_CHARS_PER_LINE:
-                        # Break long word (shouldn't happen often)
-                        while len(word) > SRTExporter.MAX_CHARS_PER_LINE:
-                            lines.append(word[:SRTExporter.MAX_CHARS_PER_LINE])
-                            word = word[SRTExporter.MAX_CHARS_PER_LINE:]
-                        current_line = word
-                    else:
-                        current_line = word
-                
-                # Check if we've reached max lines
-                if len(lines) >= SRTExporter.MAX_LINES_PER_SUBTITLE:
-                    break
-        
-        # Add remaining line
-        if current_line and len(lines) < SRTExporter.MAX_LINES_PER_SUBTITLE:
-            lines.append(current_line)
-        
-        return "\n".join(lines)
+        return "\n".join(textwrap.wrap(
+            " ".join(text.split()), width=SRTExporter.MAX_CHARS_PER_LINE,
+            break_long_words=True, break_on_hyphens=False,
+        ))
     
     @staticmethod
     def export_transcript_to_srt(transcript: List[Dict], output_path: str, 
@@ -106,9 +69,8 @@ class SRTExporter:
                     if not text:
                         continue
                     
-                    # Ensure minimum duration of 1 second
-                    if end_time - start_time < 1.0:
-                        end_time = start_time + 1.0
+                    if end_time <= start_time:
+                        continue
                     
                     # Format text according to SRT standards
                     formatted_text = SRTExporter._format_text_for_srt(text)
@@ -121,15 +83,19 @@ class SRTExporter:
                     # 00:00:00,000 --> 00:00:05,000
                     # Text content here
                     # (blank line)
-                    start_str = SRTExporter.format_timestamp(start_time)
-                    end_str = SRTExporter.format_timestamp(end_time)
-                    
-                    f.write(f"{subtitle_idx}\n")
-                    f.write(f"{start_str} --> {end_str}\n")
-                    f.write(f"{formatted_text}\n")
-                    f.write("\n")
-                    
-                    subtitle_idx += 1
+                    lines = formatted_text.splitlines()
+                    cues = ["\n".join(lines[i:i + SRTExporter.MAX_LINES_PER_SUBTITLE])
+                            for i in range(0, len(lines), SRTExporter.MAX_LINES_PER_SUBTITLE)]
+                    total_chars = sum(len(cue) for cue in cues)
+                    consumed = 0
+                    for cue in cues:
+                        cue_start = start_time + (end_time - start_time) * consumed / total_chars
+                        consumed += len(cue)
+                        cue_end = start_time + (end_time - start_time) * consumed / total_chars
+                        start_str = SRTExporter.format_timestamp(cue_start)
+                        end_str = SRTExporter.format_timestamp(cue_end)
+                        f.write(f"{subtitle_idx}\n{start_str} --> {end_str}\n{cue}\n\n")
+                        subtitle_idx += 1
             
             return True
         except Exception as e:
@@ -150,10 +116,16 @@ class SRTExporter:
         """
         os.makedirs(output_dir, exist_ok=True)
         results = {}
+        names = Counter(os.path.splitext(os.path.basename(path))[0].casefold()
+                        for path in transcripts_dict)
         
         for video_path, transcript in transcripts_dict.items():
             # Generate output filename
             base_name = os.path.splitext(os.path.basename(video_path))[0]
+            if names[base_name.casefold()] > 1:
+                identity = os.path.normcase(os.path.abspath(video_path))
+                digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+                base_name = f"{base_name}_{digest}"
             output_path = os.path.join(output_dir, f"{base_name}.srt")
             
             # Use sentence-aware export for proper SRT format
