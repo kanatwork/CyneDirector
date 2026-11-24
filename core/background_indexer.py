@@ -116,6 +116,22 @@ class BackgroundIndexer(QObject):
         """Stop background indexing timer."""
         self.background_timer.stop()
     
+    def shutdown(self):
+        """Stop scheduling and join the owned worker before model shutdown."""
+        self.background_timer.stop()
+        self.index_queue.clear()
+        worker = self.current_worker
+        if worker is not None:
+            try:
+                worker.finished.disconnect(self._on_file_indexed)
+            except (TypeError, RuntimeError):
+                pass
+            worker.stop()
+            worker.wait()
+            worker.deleteLater()
+        self.current_worker = None
+        self.is_indexing = False
+
     def process_queue(self):
         """Process next item in indexing queue."""
         if self.is_indexing or not self.index_queue or not self.can_process():

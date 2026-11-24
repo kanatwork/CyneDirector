@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QListWidget,
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QMimeData, QUrl, QRect, QPoint
 from PyQt6.QtGui import QPixmap, QImage, QDrag, QCursor, QColor
 from config import COLORS
+from core.source_state import media_path
 from core.search_engine import SearchEngine
 from core.tags import get_tag_bank
 from gui.player_window import PlayerWindow
@@ -95,6 +96,7 @@ class DraggableListWidget(QListWidget):
         if not item: return
         file_path = item.data(Qt.ItemDataRole.UserRole)
         if not file_path: return
+        file_path=media_path(file_path,getattr(self,"project_path",None))
         mime_data = QMimeData(); url = QUrl.fromLocalFile(file_path); mime_data.setUrls([url])
         drag = QDrag(self); drag.setMimeData(mime_data); drag.exec(Qt.DropAction.CopyAction)
 
@@ -104,6 +106,7 @@ class ThumbnailLoader(QThread):
 
     def __init__(self, items_to_load, project_path):
         super().__init__()
+        self.project_path = project_path
         self.items = items_to_load
         self.is_running = True
 
@@ -133,7 +136,7 @@ class ThumbnailLoader(QThread):
 
             # 2. GENERATE NEW
             try:
-                cap = cv2.VideoCapture(path)
+                cap = cv2.VideoCapture(media_path(path,self.project_path))
                 if ts > 0:
                     fps = cap.get(cv2.CAP_PROP_FPS)
                     if fps > 0: cap.set(cv2.CAP_PROP_POS_FRAMES, int(ts * fps))
@@ -451,6 +454,7 @@ class SearchTab(QWidget):
 
         # Results List/Grid
         self.results_list = DraggableListWidget()
+        self.results_list.project_path = self.project_path
         self.results_list.hide()
         self.results_list.setStyleSheet(f"""
             QListWidget {{ background: {COLORS['bg_app']}; border: 1px solid {COLORS['border']}; border-radius: 8px; outline: none; }}
@@ -465,7 +469,11 @@ class SearchTab(QWidget):
 
         # Right side: Filters panel
         self.filters_panel = self.create_filters_panel()
-        main_layout.addWidget(self.filters_panel, stretch=1)
+        self.filters_scroll = QScrollArea()
+        self.filters_scroll.setWidgetResizable(True)
+        self.filters_scroll.setWidget(self.filters_panel)
+        self.filters_scroll.setFixedWidth(275)
+        main_layout.addWidget(self.filters_scroll, stretch=1)
 
     def populate_suggestions(self):
         # Combine recent searches, popular searches, and examples
@@ -745,11 +753,12 @@ class SearchTab(QWidget):
         # Fallback to separate player window
         if not self.player_window:
             self.player_window = PlayerWindow()
+        self.player_window.project_path = self.project_path
         self.player_window.load_video(path, timestamp)
         self.player_window.show()
 
     def show_in_explorer(self, path):
-        path = os.path.normpath(path)
+        path = os.path.normpath(media_path(path,self.project_path))
         if sys.platform == 'win32': subprocess.Popen(f'explorer /select,"{path}"')
         elif sys.platform == 'darwin': subprocess.Popen(['open', '-R', path])
         else: subprocess.Popen(['xdg-open', os.path.dirname(path)])

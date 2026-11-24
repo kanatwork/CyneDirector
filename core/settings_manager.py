@@ -23,6 +23,8 @@ DEFAULTS = {
     "generate_proxies": False,
     "generate_thumbnails": True,
     "keyframe_interval": 2,          # seconds
+    "processing_memory_mib": 256,    # application buffers; model/native memory additional
+    "speech_chunk_seconds": 180,     # bounded PCM core window, plus small overlap
 
     # Appearance
     "theme": "dark",                 # dark (light is future)

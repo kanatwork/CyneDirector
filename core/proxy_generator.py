@@ -1,3 +1,4 @@
+from __future__ import annotations
 # [FILE: core/proxy_generator.py]
 # FFmpeg-based proxy video generation and thumbnail extraction.
 # All functions are non-fatal — return None and log warnings if FFmpeg is missing.
@@ -62,7 +63,7 @@ def _safe_stem(video_path: str) -> str:
 
 # ─── Public API ──────────────────────────────────────────────────────
 
-def generate_thumbnail(video_path: str, output_dir: str, timestamp: float | None = None) -> str | None:
+def generate_thumbnail(video_path: str, output_dir: str, timestamp: float | None = None, *, create_directory=True) -> str | None:
     """Extract a single JPEG thumbnail (320x180) from *video_path*.
 
     Parameters
@@ -79,6 +80,9 @@ def generate_thumbnail(video_path: str, output_dir: str, timestamp: float | None
     str or None
         Absolute path to the generated thumbnail, or ``None`` on failure.
     """
+    from core.source_state import media_path
+    output_stem=_safe_stem(video_path)
+    video_path=media_path(video_path)
     if not check_ffmpeg_available():
         logger.warning("FFmpeg not found — skipping thumbnail generation")
         return None
@@ -87,14 +91,17 @@ def generate_thumbnail(video_path: str, output_dir: str, timestamp: float | None
         logger.warning(f"Video file not found: {video_path}")
         return None
 
-    os.makedirs(output_dir, exist_ok=True)
+    if create_directory:
+        os.makedirs(output_dir, exist_ok=True)
+    elif not os.path.isdir(output_dir):
+        return None
 
     # Resolve seek timestamp
     if timestamp is None:
         duration = _get_duration(video_path)
         timestamp = duration * 0.10 if duration > 0 else 0.0
 
-    out_path = os.path.join(output_dir, f"{_safe_stem(video_path)}_thumb.jpg")
+    out_path = os.path.join(output_dir, f"{output_stem}_thumb.jpg")
 
     cmd = [
         "ffmpeg", "-y",
@@ -120,7 +127,7 @@ def generate_thumbnail(video_path: str, output_dir: str, timestamp: float | None
     return None
 
 
-def generate_proxy(video_path: str, output_dir: str, resolution: int = 720) -> str | None:
+def generate_proxy(video_path: str, output_dir: str, resolution: int = 720, *, create_directory=True) -> str | None:
     """Create an H.264 proxy video at the given vertical resolution.
 
     Parameters
@@ -138,6 +145,9 @@ def generate_proxy(video_path: str, output_dir: str, resolution: int = 720) -> s
     str or None
         Absolute path to the generated proxy file, or ``None`` on failure.
     """
+    from core.source_state import media_path
+    output_stem=_safe_stem(video_path)
+    video_path=media_path(video_path)
     if not check_ffmpeg_available():
         logger.warning("FFmpeg not found — skipping proxy generation")
         return None
@@ -146,9 +156,12 @@ def generate_proxy(video_path: str, output_dir: str, resolution: int = 720) -> s
         logger.warning(f"Video file not found: {video_path}")
         return None
 
-    os.makedirs(output_dir, exist_ok=True)
+    if create_directory:
+        os.makedirs(output_dir, exist_ok=True)
+    elif not os.path.isdir(output_dir):
+        return None
 
-    out_path = os.path.join(output_dir, f"{_safe_stem(video_path)}_proxy.mp4")
+    out_path = os.path.join(output_dir, f"{output_stem}_proxy.mp4")
 
     cmd = [
         "ffmpeg", "-y",

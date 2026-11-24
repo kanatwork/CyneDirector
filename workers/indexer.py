@@ -15,6 +15,7 @@ from core.performance import get_optimal_batch_size, log_memory_usage
 from core.proxy_generator import generate_thumbnail, generate_proxy, check_ffmpeg_available
 from collections import defaultdict
 from core.source_state import source_signature
+from core.scene_timing import sampled_time, scene_segments as make_scene_segments
 from core.clip_features import as_clip_tensor
 
 logger = get_logger(__name__)
@@ -46,6 +47,8 @@ class IndexerWorker(QThread):
             keyframe_interval = 2
         keyframe_interval = max(1, min(10, keyframe_interval))
 
+        from core.memory_budget import MemoryPolicy
+        self.memory_policy = MemoryPolicy()
         # --- Mode-based Settings ---
         # Optimize batch size based on available memory and device
         device = AIBackend().device
@@ -84,12 +87,14 @@ class IndexerWorker(QThread):
         else:
             self.batch_size = auto_batch
 
+        self.batch_size = min(self.batch_size, self.memory_policy.frame_batch)
+
         logger.info(f"Indexer initialized with batch_size={self.batch_size} keyframe_interval={keyframe_interval}s (mode={mode})")
         log_memory_usage("IndexerWorker init")
         
         # Batch write optimization (applies to both modes)
         self.db_write_batch = []  # Batch database writes
-        self.db_write_batch_size = 100  # Write every 100 embeddings  
+        self.db_write_batch_size = self.memory_policy.vector_batch
 
     def calculate_histogram(self, image):
         """Creates a color fingerprint for the frame to detect cuts/motion."""
@@ -118,7 +123,9 @@ class IndexerWorker(QThread):
 
     def run(self):
         try:
-            self._run_indexing()
+            from core.processing import processing_guard
+            with processing_guard(self.project_path, self.file_paths, ["index_visuals"]):
+                self._run_indexing()
         except Exception as exc:
             self.errors.append(str(exc))
             logger.exception("Visual indexing failed")
@@ -127,12 +134,15 @@ class IndexerWorker(QThread):
             self.finished_signal.emit()
 
     def _run_indexing(self):
+        from core.memory_budget import MemoryPolicy
         logger.debug(f"IndexerWorker.run() started (mode={self.mode})")
         self.progress_signal.emit(1)
         self.log_signal.emit("Initializing Smart-Action AI (Blur-Gate Enabled)...")
         
         ai = AIBackend()
         db = Database(self.project_path)
+        self.file_paths=[db.source_key(path) for path in self.file_paths]
+        self.memory_policy = getattr(db._local,"memory_policy",getattr(self,"memory_policy",MemoryPolicy()))
         
         try:
             # Load Models
@@ -166,70 +176,107 @@ class IndexerWorker(QThread):
         log_memory_usage("Before indexing loop")
         
         for idx, video_path in enumerate(self.file_paths):
-            if not self.is_running: break
-            
-            filename = os.path.basename(video_path)
-            signature = source_signature(video_path)
+            if not self.is_running:
+                break
+            self.db_write_batch = []
             file_error_count = len(self.errors)
-            self.log_signal.emit(f"Processing {idx + 1}/{total_files}: {filename}")
-            self.log_signal.emit(f"  → Starting deep visual analysis...")
-            
-            # Log memory usage periodically
-            if idx % 5 == 0:
-                log_memory_usage(f"Processing file {idx + 1}/{total_files}")
-            
-            cap = cv2.VideoCapture(video_path)
-            if not cap.isOpened():
-                self.errors.append(f"Cannot open video: {filename}")
-                self.log_signal.emit(f"  ✗ Failed to open video file")
-                continue
-            
+            try:
+                with db.reprocess(video_path, "visual", source_signature(video_path),
+                        allowed=lambda: self.is_running and len(self.errors) == file_error_count) as staged:
+                    self._index_file(video_path, ai, staged, clip_model, clip_processor,
+                                     blip_model, blip_processor, yolo_model, tag_list, idx, total_files)
+                self.summary_signal.emit(video_path, db.get_video_metadata(video_path).get("summary", ""))
+                self.log_signal.emit(f"Published: {os.path.basename(video_path)}")
+            except Exception as exc:
+                if self.is_running:
+                    self.errors.append(f"{video_path}: {exc}")
+                self.log_signal.emit(f"Not published: {os.path.basename(video_path)} ({exc})")
+
+        # Cleanup - Keep CLIP loaded as transcriber needs it for embeddings
+        logger.debug("Unloading models (keeping CLIP for transcript embeddings)")
+        try:
+            ai.unload_models(keep_clip=True)
+            logger.debug("Models unloaded successfully")
+        except Exception as e:
+            logger.exception("Error unloading models")
+            raise
+        if self.is_running and not self.errors:
+            self.progress_signal.emit(100)
+        logger.debug("Indexing worker finished")
+
+    def _index_file(self, video_path, ai, db, clip_model, clip_processor,
+                    blip_model, blip_processor, yolo_model, tag_list, idx, total_files):
+        from core.source_state import media_path
+        from core.memory_budget import MemoryPolicy, RecordBuffer, Tail, ThreeFrameSet
+        policy = getattr(self,"memory_policy",MemoryPolicy())
+        self.batch_size = min(self.batch_size,policy.frame_batch)
+        self.memory_stats = dict(policy.describe(),peak_scene_images=0,peak_frame_batch=0,peak_keyframes=0)
+        filename = os.path.basename(video_path)
+        self.log_signal.emit(f"Processing {idx + 1}/{total_files}: {filename}")
+        self.log_signal.emit(f"  → Starting deep visual analysis...")
+
+        # Log memory usage periodically
+        if idx % 5 == 0:
+            log_memory_usage(f"Processing file {idx + 1}/{total_files}")
+
+        cap = cv2.VideoCapture(media_path(video_path))
+        if not cap.isOpened():
+            cap.release()
+            raise ValueError(f"Cannot open video: {filename}")
+
+        try:
             fps = cap.get(cv2.CAP_PROP_FPS)
-            if fps <= 0: fps = 24.0
+            if not np.isfinite(fps) or fps <= 0:
+                raise ValueError("Invalid source frame rate; keeping existing index")
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            db.clear_metadata_keys(video_path, ["visual_source_signature"])
-            db.clear_visual_embeddings(video_path)
+            if total_frames <= 0:
+                raise ValueError("No decodable frame count; keeping existing index")
+            db.clear_metadata_keys(video_path, ["visual_source_signature", "objects_yolo", "objects", "emotions",
+                                                "thumbnail_path", "proxy_path"])
             db.update_metadata_key(video_path, "duration", total_frames / fps)
-            
+
             # --- SCENE CONTAINER ---
-            detected_scenes = []
-            current_scene = {'best_frame': None, 'score': -1.0}
-            
+            detected_scenes = RecordBuffer(policy.scene_records,policy.metadata_bytes//2,excluded=("best_frame",))
+            retained_scene_images = 0
+            current_scene = {'start': 0.0, 'cut_lower_bound': 0.0, 'best_frame': None, 'score': -1.0}
+
             # Batching for CLIP
             frames_batch = []
             timestamps_batch = []
             tag_scores = defaultdict(float)
-            
+
             # For accuracy mode: track which tags appear in which frames
             if self.mode == "accuracy":
-                tag_frame_occurrences = defaultdict(set)  # tag_name -> set of frame indices
+                tag_frame_occurrences = defaultdict(ThreeFrameSet)  # tag_name -> set of frame indices
             else:
                 tag_frame_occurrences = None
-            
+
             prev_hist = None
+            previous_time = None
+            timing_methods = set()
             last_indexed_time = -self.max_interval
-            
+
             # Track frame count for accuracy mode
             total_indexed_frames = 0
-            
+
             # Adaptive sampling: Track motion history for adaptive step size
             motion_history = []
             recent_motion_scores = []
             adaptive_scan_step = int(fps / 3) if fps > 10 else 1
-            
+
             # Keyframe candidates (high quality, high motion frames)
-            keyframe_candidates = []
-            
+            keyframe_candidates = Tail(policy.keyframes)
+
             # Scan Step - More frequent in accuracy mode
             if self.mode == "accuracy":
                 base_scan_step = max(1, int(fps / 6)) if fps > 10 else 1  # More frequent sampling
             else:
                 # Speed mode: Use larger steps for faster processing
                 base_scan_step = max(1, int(fps / 2)) if fps > 10 else 1  # Changed from fps/3
-            
+
             for frame_num in range(0, total_frames, base_scan_step):
                 if not self.is_running: break
-                
+
                 # Update UI occasionally
                 if frame_num % 100 == 0:
                     current_percent = int(((idx) / total_files * 100) + (frame_num / total_frames * (100 / total_files)))
@@ -237,9 +284,13 @@ class IndexerWorker(QThread):
 
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
                 ret, frame = cap.read()
-                if not ret: break
-                
-                current_time = frame_num / fps
+                if not ret:
+                    raise ValueError(f"Decode failed at sampled frame {frame_num}; keeping existing index")
+
+                decoded_position = cap.get(cv2.CAP_PROP_POS_FRAMES)
+                decoded_frame = int(round(decoded_position)) - 1 if decoded_position > 0 else frame_num
+                current_time, timing_method = sampled_time(decoded_frame, fps, cap.get(cv2.CAP_PROP_POS_MSEC), previous_time)
+                timing_methods.add(timing_method)
                 curr_hist = self.calculate_histogram(frame)
                 sharpness = self.calculate_sharpness(frame)
 
@@ -252,7 +303,7 @@ class IndexerWorker(QThread):
                     recent_motion_scores.append(motion_score)
                     if len(recent_motion_scores) > 10:
                         recent_motion_scores.pop(0)
-                
+
                 # Adaptive sampling: Adjust scan step based on motion
                 if len(recent_motion_scores) >= 5:
                     avg_motion = sum(recent_motion_scores) / len(recent_motion_scores)
@@ -264,33 +315,36 @@ class IndexerWorker(QThread):
                         adaptive_scan_step = min(int(base_scan_step * 2), int(fps * 2))
                     else:
                         adaptive_scan_step = base_scan_step
-                
+
                 # New Scene Detected?
                 if similarity < self.scene_threshold:
-                    if current_scene['best_frame'] is not None:
-                        detected_scenes.append(current_scene)
-                    current_scene = {'best_frame': None, 'score': -1.0}
+                    current_scene['end'] = current_time
+                    detected_scenes.append(current_scene)
+                    retained_scene_images += int(current_scene.get('best_frame') is not None)
+                    current_scene = {'start': current_time, 'cut_lower_bound': previous_time, 'best_frame': None, 'score': -1.0}
 
                 # --- 2. FIND BEST ACTION FRAME & KEYFRAME DETECTION ---
-                if prev_hist is not None:
+                if frame is not None:
                     if sharpness > self.blur_threshold:
                         quality_score = motion_score * sharpness
                         if quality_score > current_scene['score']:
                             current_scene['score'] = quality_score
-                            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                            pil_img = Image.fromarray(rgb)
-                            
-                            # OPTIMIZATION: Resize immediately to save RAM
-                            # We only need ~384px for BLIP captioning
-                            current_scene['best_frame'] = self._resize_for_ai(pil_img, 480)
-                        
+                            current_scene['frame_time'] = current_time
+                            current_scene['frame_num'] = decoded_frame
+                            current_scene['representative_available'] = True
+                            if retained_scene_images < policy.scene_images:
+                                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                                pil_img = Image.fromarray(rgb)
+                                current_scene['best_frame'] = self._resize_for_ai(pil_img, 480)
+                                self.memory_stats['peak_scene_images'] = max(self.memory_stats['peak_scene_images'],retained_scene_images+1)
+
                         # Keyframe detection: High quality + significant motion or scene cut
                         is_keyframe = False
                         if motion_score > 0.4 and sharpness > self.blur_threshold * 1.5:
                             is_keyframe = True  # High motion + high quality
                         elif similarity < self.scene_threshold and sharpness > self.blur_threshold:
                             is_keyframe = True  # Scene cut + good quality
-                        
+
                         if is_keyframe:
                             keyframe_candidates.append({
                                 'frame_num': frame_num,
@@ -300,13 +354,15 @@ class IndexerWorker(QThread):
                                 'score': quality_score
                             })
 
+                self.memory_stats['peak_keyframes'] = max(self.memory_stats['peak_keyframes'],len(keyframe_candidates))
+
                 # --- 3. ADAPTIVE INDEXING FOR TAGS (CLIP) ---
                 time_since_last = current_time - last_indexed_time
                 should_index = False
-                
+
                 # Priority indexing for keyframes
                 is_keyframe_frame = any(kf['frame_num'] == frame_num for kf in keyframe_candidates[-5:])
-                
+
                 if is_keyframe_frame:
                     # Always index keyframes
                     should_index = True
@@ -324,12 +380,13 @@ class IndexerWorker(QThread):
                 if should_index:
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     pil_img = Image.fromarray(img_rgb)
-                    
+
                     # OPTIMIZATION: Resize immediately for CLIP (input is usually 224 or 336)
                     # Storing 64 4K images in a list will crash Python.
                     resized_img = self._resize_for_ai(pil_img, 336)
-                    
+
                     frames_batch.append(resized_img)
+                    self.memory_stats['peak_frame_batch'] = max(self.memory_stats['peak_frame_batch'],len(frames_batch))
                     timestamps_batch.append(current_time)
                     last_indexed_time = current_time
                     total_indexed_frames += 1
@@ -339,43 +396,34 @@ class IndexerWorker(QThread):
                         self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores, tag_frame_occurrences, start_frame_idx)
                         frames_batch = []
                         timestamps_batch = []
-                        
+
                 prev_hist = curr_hist
+                previous_time = current_time
 
             # --- END OF FILE PROCESSING ---
-            if current_scene['best_frame'] is not None:
-                detected_scenes.append(current_scene)
+            if not self.is_running:
+                return
+            detected_scenes.append(current_scene)
 
             # Process leftover batch
             if frames_batch:
                 start_frame_idx = total_indexed_frames - len(frames_batch) if self.mode == "accuracy" else None
                 self.process_batch(frames_batch, timestamps_batch, ai, db, video_path, clip_model, clip_processor, tag_list, tag_scores, tag_frame_occurrences, start_frame_idx)
-            
+
             # Flush any remaining batched database writes
             if hasattr(self, 'db_write_batch') and self.db_write_batch:
                 self._flush_db_batch(db, video_path)
-            
-            cap.release()
-            
+
             # --- SAVE SCENE SEGMENTS FOR TEMPORAL SEARCH ---
-            scene_segments = []
+            scene_segments = make_scene_segments(detected_scenes, total_frames / fps, base_scan_step / fps)
+            db.save_scene_segments(video_path, scene_segments)
+            self.memory_stats.update(scene_records=len(detected_scenes),scene_record_bytes=detected_scenes.bytes)
+            db.update_metadata_key(video_path,"visual_processing_memory",self.memory_stats)
+            db.update_metadata_key(video_path, "source_timing", {
+                "fps": fps, "frame_count": total_frames, "duration": total_frames / fps,
+                "duration_method": "frame_count/fps", "timestamp_methods": sorted(timing_methods),
+                "precision": "sampled", "sample_interval": base_scan_step / fps})
             if detected_scenes:
-                scene_start = 0
-                for i, scene in enumerate(detected_scenes):
-                    # Estimate scene end (next scene start or video end)
-                    scene_end = (i + 1) * (total_frames / fps / len(detected_scenes)) if i < len(detected_scenes) - 1 else total_frames / fps
-                    scene_segments.append({
-                        "start": scene_start,
-                        "end": scene_end,
-                        "duration": scene_end - scene_start,
-                        "score": scene.get('score', 0),
-                        "has_best_frame": scene.get('best_frame') is not None
-                    })
-                    scene_start = scene_end
-                
-                # Save scene segments to database
-                db.save_scene_segments(video_path, scene_segments)
-                
                 # Generate temporal sequence embeddings for key scenes
                 if len(detected_scenes) > 0 and clip_model:
                     try:
@@ -388,21 +436,22 @@ class IndexerWorker(QThread):
                                     seq_embedding = as_clip_tensor(clip_model.get_image_features(**inputs))
                                     seq_embedding /= seq_embedding.norm(p=2, dim=-1, keepdim=True)
                                     seq_embedding = seq_embedding.cpu().numpy()[0].tolist()
-                                
+
                                 # Get scene time bounds
                                 scene_start = scene_segments[i]['start'] if i < len(scene_segments) else 0
                                 scene_end = scene_segments[i]['end'] if i < len(scene_segments) else total_frames / fps
-                                
+
                                 db.add_temporal_sequence(video_path, seq_embedding, scene_start, scene_end)
                     except Exception as e:
-                        print(f"Temporal sequence error: {e}")
+                        raise RuntimeError(f"Temporal sequence write/inference failed: {e}") from e
 
             # --- PHASE 2: GENERATE DESCRIPTIONS (BLIP) - Improved Quality ---
             self.log_signal.emit(f"  → Detected {len(detected_scenes)} scene(s), generating descriptions...")
             descriptions = []
+            timed_descriptions = []
             # Analyze more scenes (up to 5) for better coverage
-            final_scenes = detected_scenes[:5] if len(detected_scenes) >= 5 else detected_scenes
-            
+            final_scenes = [scene for scene in detected_scenes if scene.get('best_frame') is not None][:5]
+
             # Also sample frames at key timestamps: beginning, 25%, 50%, 75%, end
             key_timestamps = []
             if total_frames > 0:
@@ -413,30 +462,31 @@ class IndexerWorker(QThread):
                     int(total_frames * 0.75),  # Three quarters
                     int(total_frames * 0.95)   # Near end
                 ]
-            
+
             # Fallback: If no good frames found, use key timestamps
             if not final_scenes and total_frames > 0:
                 try:
-                    cap_retry = cv2.VideoCapture(video_path)
+                    cap_retry = cv2.VideoCapture(media_path(video_path))
                     for frame_num in key_timestamps[:3]:  # Use first 3 key frames
                         cap_retry.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
                         ret, frame = cap_retry.read()
                         if ret:
                             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                             pil_img = Image.fromarray(rgb)
-                            final_scenes.append({'best_frame': self._resize_for_ai(pil_img, 480), 'score': 0.0})
+                            stamp, method = sampled_time(frame_num, fps, cap_retry.get(cv2.CAP_PROP_POS_MSEC))
+                            final_scenes.append({'best_frame': self._resize_for_ai(pil_img, 480), 'score': 0.0, 'frame_time': stamp, 'frame_num': frame_num})
                     cap_retry.release()
                 except Exception as e:
                     print(f"Fallback frame capture error: {e}")
                     pass
-            
+
             # Improved prompts - more specific to prevent hallucinations and out-of-context phrases
             prompts = [
                 "a photo of",
                 "a picture showing",
                 "an image of"
             ]
-            
+
             # Common hallucination patterns to filter out
             hallucination_patterns = [
                 "with words that describe",
@@ -460,15 +510,15 @@ class IndexerWorker(QThread):
                 "to the app",
                 "from the app"
             ]
-            
+
             for i, scene in enumerate(final_scenes):
                 try:
                     # Use rotating prompts for variety
                     prompt = prompts[i % len(prompts)]
-                    
+
                     # Pass the resized image to BLIP with prompt
                     inputs = blip_processor(images=scene['best_frame'], text=prompt, return_tensors="pt").to(ai.device)
-                    
+
                     # BLIP pixel values must match model dtype.
                     # Only use half() on CUDA — MPS/CPU use float32.
                     if ai.device == "cuda" and ai.dtype == torch.float16:
@@ -495,7 +545,7 @@ class IndexerWorker(QThread):
                                     desc = desc[len(p):].strip()
                                     desc_lower = desc.lower()
                                     break
-                            
+
                             # Remove hallucination patterns (aggressive filtering)
                             for pattern in hallucination_patterns:
                                 if pattern in desc_lower:
@@ -507,14 +557,14 @@ class IndexerWorker(QThread):
                                             cleaned_sentences.append(sentence.strip())
                                     desc = '. '.join(cleaned_sentences).strip()
                                     desc_lower = desc.lower()
-                            
+
                             # Remove common repetitive patterns and artifacts
                             desc = desc.replace("in this image", "")
                             desc = desc.replace("in the image", "")
                             desc = desc.replace("from the", "")
                             desc = desc.replace("to the", "")
                             desc = desc.replace("of the", "")
-                            
+
                             # Remove repetitive phrases (check for word repetition)
                             words = desc.split()
                             cleaned_words = []
@@ -531,19 +581,19 @@ class IndexerWorker(QThread):
                                 seen_words_recent.append(word_lower)
                                 if len(seen_words_recent) > 5:
                                     seen_words_recent.pop(0)
-                            
+
                             desc = " ".join(cleaned_words).strip()
-                            
+
                             # Remove multiple spaces
                             while "  " in desc:
                                 desc = desc.replace("  ", " ")
-                            
+
                             # Final cleanup - remove leading/trailing punctuation
                             desc = desc.strip(".,;: ")
                             # Ensure it ends with proper punctuation
                             if desc and not desc[-1] in ".!?":
                                 desc = desc + "."
-                            
+
                             # Only add if meaningful (more than 10 chars, at least 3 unique words, no hallucinations)
                             unique_words = set([w.lower().strip(".,;:!?") for w in desc.split() if len(w) > 2])
                             if len(desc) > 10 and len(unique_words) >= 3:
@@ -551,8 +601,13 @@ class IndexerWorker(QThread):
                                 has_hallucination = any(pattern in desc_lower for pattern in hallucination_patterns)
                                 if not has_hallucination:
                                     descriptions.append(desc)
+                                    timed_descriptions.append({"text": desc, "timestamp": scene["frame_time"],
+                                        "scene_start": scene.get("start"), "scene_end": scene.get("end"),
+                                        "precision": "sampled"})
                 except Exception as e:
                     print(f"BLIP Scene {i} Error: {e}")
+
+            db.update_metadata_key(video_path, "scene_descriptions", timed_descriptions)
 
             # Format Summary - Improved merging
             if descriptions:
@@ -575,7 +630,7 @@ class IndexerWorker(QThread):
                     if not is_duplicate:
                         unique_desc.append(desc)
                         seen.add(desc_lower)
-                
+
                 # Create a more natural summary
                 if len(unique_desc) == 1:
                     full_description = unique_desc[0][0].upper() + unique_desc[0][1:] + "."
@@ -595,7 +650,7 @@ class IndexerWorker(QThread):
             # --- PHASE 3: FINALIZE TAGS (Improved Accuracy - Target 8+ Highly Accurate Keywords) ---
             self.log_signal.emit(f"  → Finalizing tags from {len(tag_scores)} candidates...")
             sorted_tags = sorted(tag_scores.items(), key=lambda item: item[1], reverse=True)
-            
+
             # Calculate adaptive threshold based on score distribution and mode
             if sorted_tags:
                 max_score = sorted_tags[0][1]
@@ -603,11 +658,11 @@ class IndexerWorker(QThread):
                 adaptive_threshold = max(0.1, max_score * self.tag_threshold_percent)
             else:
                 adaptive_threshold = 0.1
-            
+
             # Filter tags: higher threshold for accuracy
             # Take top 30 candidates that meet the threshold
             candidate_tags = [tag for tag, score in sorted_tags[:30] if score >= adaptive_threshold]
-            
+
             # Accuracy mode: Cross-frame validation - tags must appear in multiple frames
             # For very strict mode: require 3+ frames instead of 2
             min_frames_required = 3 if self.mode == "accuracy" else self.min_frames_for_tag
@@ -619,7 +674,7 @@ class IndexerWorker(QThread):
                         validated_candidates.append(tag)
                 candidate_tags = validated_candidates
                 self.log_signal.emit(f"  → Cross-frame validation: {len(candidate_tags)} tags appear in {min_frames_required}+ frames")
-            
+
             # BLIP Description Validation - tags must appear in BLIP scene descriptions
             if self.mode == "accuracy" and descriptions:
                 blip_text = " ".join([d.lower() for d in descriptions]).lower()
@@ -641,7 +696,7 @@ class IndexerWorker(QThread):
                         blip_validated.append(tag)
                 candidate_tags = blip_validated
                 self.log_signal.emit(f"  → BLIP validation: {len(candidate_tags)} tags match scene descriptions")
-            
+
             # Semantic Relevance Check - tags must be semantically relevant to scene context
             if self.mode == "accuracy" and len(candidate_tags) > 0 and detected_scenes:
                 try:
@@ -654,12 +709,12 @@ class IndexerWorker(QThread):
                                 frame_features = as_clip_tensor(clip_model.get_image_features(**inputs))
                                 frame_features /= frame_features.norm(p=2, dim=-1, keepdim=True)
                                 scene_embeddings.append(frame_features.cpu().numpy()[0])
-                    
+
                     if scene_embeddings:
                         # Average scene embedding
                         avg_scene_emb = np.mean(scene_embeddings, axis=0)
                         avg_scene_emb = avg_scene_emb / np.linalg.norm(avg_scene_emb)
-                        
+
                         # Check tag relevance
                         semantically_relevant = []
                         tag_texts = list(candidate_tags)
@@ -667,19 +722,19 @@ class IndexerWorker(QThread):
                         with torch.no_grad():
                             tag_features = as_clip_tensor(clip_model.get_text_features(**inputs))
                             tag_features /= tag_features.norm(p=2, dim=-1, keepdim=True)
-                            
+
                             for i, tag in enumerate(candidate_tags):
                                 tag_emb = tag_features[i].cpu().numpy()
                                 similarity = np.dot(tag_emb, avg_scene_emb)
                                 if similarity >= 0.4:  # Semantic relevance threshold
                                     semantically_relevant.append(tag)
-                        
+
                         candidate_tags = semantically_relevant
                         self.log_signal.emit(f"  → Semantic relevance: {len(candidate_tags)} tags match scene context")
                 except Exception as e:
                     print(f"Semantic relevance check error: {e}")
                     # Continue without semantic check if it fails
-            
+
             # Remove redundant/similar tags
             # For accuracy mode: use semantic similarity with CLIP embeddings
             # For speed mode: use simple substring matching
@@ -696,18 +751,18 @@ class IndexerWorker(QThread):
                         text_features /= text_features.norm(p=2, dim=-1, keepdim=True)
                         for i, tag in enumerate(candidate_tags):
                             tag_embeddings[tag] = text_features[i].cpu().numpy()
-                    
+
                     # Find semantically similar tags and keep only the best one
                     similarity_threshold = 0.85  # High threshold for semantic similarity
                     for tag in candidate_tags:
                         is_redundant = False
                         tag_emb = tag_embeddings[tag]
                         tag_lower = tag.lower()
-                        
+
                         for existing in filtered_tags:
                             existing_emb = tag_embeddings[existing]
                             existing_lower = existing.lower()
-                            
+
                             # Check substring match first (faster)
                             if tag_lower in existing_lower or existing_lower in tag_lower:
                                 if len(tag) <= len(existing):
@@ -716,7 +771,7 @@ class IndexerWorker(QThread):
                                 else:
                                     filtered_tags.remove(existing)
                                     break
-                            
+
                             # Check semantic similarity
                             similarity = np.dot(tag_emb, existing_emb)
                             if similarity >= similarity_threshold:
@@ -729,10 +784,10 @@ class IndexerWorker(QThread):
                                 else:
                                     filtered_tags.remove(existing)
                                     break
-                        
+
                         if not is_redundant:
                             filtered_tags.append(tag)
-                    
+
                     self.log_signal.emit(f"  → Semantic deduplication: {len(filtered_tags)} unique tags after similarity filtering")
                 except Exception as e:
                     # Fallback to simple substring matching if semantic deduplication fails
@@ -770,7 +825,7 @@ class IndexerWorker(QThread):
                                 break
                     if not is_redundant:
                         filtered_tags.append(tag)
-            
+
             # Final Tag Bank Relevance Filter - remove tags that are in irrelevant list
             from core.tags import _is_irrelevant_tag
             final_filtered = []
@@ -780,7 +835,7 @@ class IndexerWorker(QThread):
             filtered_tags = final_filtered
             if len(final_filtered) < len(filtered_tags):
                 self.log_signal.emit(f"  → Tag bank filter: {len(final_filtered)} tags after removing irrelevant")
-            
+
             # Target: 8-12 highly accurate tags (reduced from 15 for stricter filtering)
             # If we have enough high-quality tags, use them
             if len(filtered_tags) >= 8:
@@ -827,7 +882,7 @@ class IndexerWorker(QThread):
                     final_tags = filtered_tags[:12]  # Cap at 12 for very strict mode
                 else:
                     final_tags = []
-            
+
             # Final safety: Ensure we have at least 8 tags if possible
             if len(final_tags) < 8 and sorted_tags:
                 # Take top 8-12 by score, but still apply basic filtering
@@ -854,7 +909,7 @@ class IndexerWorker(QThread):
                 best_scene_frame = detected_scenes[0]['best_frame']
                 if best_scene_frame is None and len(detected_scenes) > 1:
                     best_scene_frame = detected_scenes[1]['best_frame']
-                
+
                 if best_scene_frame is not None:
                     try:
                         # Shot type tags to match against
@@ -867,25 +922,25 @@ class IndexerWorker(QThread):
                             "Dutch Angle", "Point of View Shot", "POV Shot",
                             "Two Shot", "Three Shot", "Group Shot", "Crowd Shot"
                         ]
-                        
+
                         # Process frame for CLIP
                         inputs = clip_processor(images=best_scene_frame, return_tensors="pt", padding=True).to(ai.device)
                         with torch.no_grad():
                             frame_features = as_clip_tensor(clip_model.get_image_features(**inputs))
                             frame_features /= frame_features.norm(p=2, dim=-1, keepdim=True)
-                            
+
                             # Encode shot type tags
                             shot_inputs = clip_processor(text=shot_type_tags, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
                             shot_text_features = as_clip_tensor(clip_model.get_text_features(**shot_inputs))
                             shot_text_features /= shot_text_features.norm(p=2, dim=-1, keepdim=True)
-                            
+
                             # Calculate similarity
                             similarities = (frame_features @ shot_text_features.T).cpu().numpy()[0]
-                            
+
                             # Get best match
                             best_idx = np.argmax(similarities)
                             best_score = float(similarities[best_idx])
-                            
+
                             # Only use if confidence is high enough (0.3 threshold)
                             if best_score >= 0.3:
                                 shot_type = shot_type_tags[best_idx]
@@ -905,24 +960,24 @@ class IndexerWorker(QThread):
             if full_description and full_description != "Visuals unavailable.":
                 # Split by sentences for better LLM processing
                 visual_descriptions_list = [d.strip() for d in full_description.split('.') if d.strip()]
-            
+
             # Save visual descriptions temporarily for later summary generation
             db.update_metadata_key(video_path, "visual_descriptions_temp", visual_descriptions_list)
-            
+
             # For now, save a placeholder summary (will be replaced when audio is transcribed)
             final_summary = full_description
 
             # --- PHASE 5: EMOTION & OBJECT DETECTION ---
             detected_emotions = []
             detected_objects = []
-            
+
             if detected_scenes and len(detected_scenes) > 0:
                 # Use representative frames from scenes for emotion/object detection
                 sample_frames = []
                 for scene in detected_scenes[:3]:  # Use first 3 scenes
                     if scene.get('best_frame'):
                         sample_frames.append(scene['best_frame'])
-                
+
                 if sample_frames:
                     try:
                         # Emotion Detection
@@ -930,44 +985,44 @@ class IndexerWorker(QThread):
                             "happy face", "sad face", "angry face", "surprised face", 
                             "neutral face", "excited face", "worried face", "confused face"
                         ]
-                        
+
                         # Object Detection Prompts
                         object_prompts = [
                             "person holding phone", "person holding camera", "person holding book",
                             "person holding cup", "person holding bag", "person near car",
                             "person near computer", "person near table", "person near door"
                         ]
-                        
+
                         # Process frames for emotion detection
                         for frame in sample_frames:
                             inputs = clip_processor(images=frame, return_tensors="pt", padding=True).to(ai.device)
                             with torch.no_grad():
                                 frame_features = as_clip_tensor(clip_model.get_image_features(**inputs))
                                 frame_features /= frame_features.norm(p=2, dim=-1, keepdim=True)
-                                
+
                                 # Check emotions
                                 emotion_inputs = clip_processor(text=emotion_prompts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
                                 emotion_text_features = as_clip_tensor(clip_model.get_text_features(**emotion_inputs))
                                 emotion_text_features /= emotion_text_features.norm(p=2, dim=-1, keepdim=True)
                                 emotion_similarities = (frame_features @ emotion_text_features.T).cpu().numpy()[0]
-                                
+
                                 best_emotion_idx = np.argmax(emotion_similarities)
                                 best_emotion_score = float(emotion_similarities[best_emotion_idx])
-                                
+
                                 if best_emotion_score >= 0.3:  # Threshold for emotion detection
                                     emotion_name = emotion_prompts[best_emotion_idx].replace(" face", "").title()
                                     if emotion_name not in detected_emotions:
                                         detected_emotions.append(emotion_name)
-                                
+
                                 # Check objects
                                 object_inputs = clip_processor(text=object_prompts, return_tensors="pt", padding=True, truncation=True, max_length=77).to(ai.device)
                                 object_text_features = as_clip_tensor(clip_model.get_text_features(**object_inputs))
                                 object_text_features /= object_text_features.norm(p=2, dim=-1, keepdim=True)
                                 object_similarities = (frame_features @ object_text_features.T).cpu().numpy()[0]
-                                
+
                                 best_object_idx = np.argmax(object_similarities)
                                 best_object_score = float(object_similarities[best_object_idx])
-                                
+
                                 if best_object_score >= 0.3:  # Threshold for object detection
                                     object_desc = object_prompts[best_object_idx]
                                     if object_desc not in detected_objects:
@@ -984,10 +1039,8 @@ class IndexerWorker(QThread):
                         continue
                     try:
                         yolo_results = yolo_model(scene['best_frame'], verbose=False)
-                        # Estimate timestamp from scene segments
-                        timestamp = 0
-                        if i < len(scene_segments):
-                            timestamp = scene_segments[i]['start']
+                        # Detection belongs to the sampled representative frame.
+                        timestamp = scene["frame_time"]
 
                         for result in yolo_results:
                             boxes = result.boxes
@@ -1028,41 +1081,35 @@ class IndexerWorker(QThread):
             # --- PHASE 6: THUMBNAIL & PROXY GENERATION ---
             from config import get_setting
             if get_setting("generate_thumbnails", True):
-                thumb_dir = os.path.join(self.project_path, "_cyne_db", "thumbnails")
-                thumb_path = generate_thumbnail(video_path, thumb_dir)
+                from core.workspace import artifact_directory
+                thumb_dir = artifact_directory(self.project_path, "thumbnails", db.generation)
+                thumb_path = generate_thumbnail(video_path, thumb_dir, create_directory=False)
                 if thumb_path:
                     db.update_metadata_key(video_path, "thumbnail_path", thumb_path)
                     self.log_signal.emit(f"  → Thumbnail saved")
+                else:
+                    raise RuntimeError("Requested thumbnail failed; retaining the previous generation")
 
             if get_setting("generate_proxies", False):
-                proxy_dir = os.path.join(self.project_path, "_cyne_db", "proxies")
-                proxy_path = generate_proxy(video_path, proxy_dir)
+                from core.workspace import artifact_directory
+                proxy_dir = artifact_directory(self.project_path, "proxies", db.generation)
+                proxy_path = generate_proxy(video_path, proxy_dir, create_directory=False)
                 if proxy_path:
                     db.update_metadata_key(video_path, "proxy_path", proxy_path)
                     self.log_signal.emit(f"  → Proxy generated")
+                else:
+                    raise RuntimeError("Requested proxy failed; retaining the previous generation")
 
             # Update last_scanned timestamp for incremental indexing
-            if self.is_running and signature is not None and len(self.errors) == file_error_count:
-                db.update_metadata_key(video_path, "visual_source_signature", signature)
             try:
-                file_mtime = os.path.getmtime(video_path)
+                file_mtime = os.path.getmtime(media_path(video_path))
                 db.update_metadata_key(video_path, "last_scanned", file_mtime)
             except OSError:
                 db.update_metadata_key(video_path, "last_scanned", time.time())
-            
-            self.summary_signal.emit(video_path, final_summary)
-            self.log_signal.emit(f"  Completed: {filename} ({len(final_tags)} tags, {shot_type})")
-        
-        # Cleanup - Keep CLIP loaded as transcriber needs it for embeddings
-        logger.debug("Unloading models (keeping CLIP for transcript embeddings)")
-        try:
-            ai.unload_models(keep_clip=True)
-            logger.debug("Models unloaded successfully")
-        except Exception as e:
-            logger.exception("Error unloading models")
-            raise
-        self.progress_signal.emit(100)
-        logger.debug("Indexing complete, emitting finished signal")
+
+
+        finally:
+            cap.release()
 
     def process_batch(self, images, timestamps, ai, db, video_path, model, processor, tag_list, tag_scores, tag_frame_occurrences=None, start_frame_idx=None):
         try:
@@ -1078,10 +1125,8 @@ class IndexerWorker(QThread):
                 if hasattr(self, 'db_write_batch'):
                     for vec, ts in zip(vectors_list, timestamps):
                         self.db_write_batch.append((vec, ts))
-                    
-                    # Flush batch when it reaches threshold
-                    if len(self.db_write_batch) >= self.db_write_batch_size:
-                        self._flush_db_batch(db, video_path)
+                        if len(self.db_write_batch) >= self.db_write_batch_size:
+                            self._flush_db_batch(db, video_path)
                 else:
                     # Fallback to immediate write
                     db.add_visual_embeddings(video_path, vectors_list, timestamps)

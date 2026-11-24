@@ -50,9 +50,11 @@ class MainWindow(QMainWindow):
         
         # Background indexing
         from core.background_indexer import BackgroundIndexer
+        from core.workspace import Workspace
         self.background_indexer = BackgroundIndexer(self.project_path)
         self.background_indexer.can_process = lambda: (
-            self.worker is None and not self.workflow_manager.is_running)
+            self.worker is None and not self.workflow_manager.is_running
+            and Workspace.path(self.project_path).is_file())
         self.background_indexer.indexing_progress.connect(self.on_background_indexing_progress)
         self.background_indexer.file_indexed.connect(self.on_file_indexed)
         self.background_indexer.indexing_finished.connect(self.on_background_indexing_finished) 
@@ -134,6 +136,10 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(_cfg_init.STYLESHEET)
 
         logger.debug("MainWindow initialization complete")
+        # Laptop displays must not inherit the full metadata form's size hint.
+        if self.screen():
+            available = self.screen().availableGeometry()
+            self.resize(min(1600, available.width()), min(950, max(400, available.height() - 40)))
 
     def setup_ui(self):
         main_widget = QWidget()
@@ -790,9 +796,13 @@ class MainWindow(QMainWindow):
         """Detect GPU and set the indicator."""
         try:
             import torch
-            if torch.cuda.is_available():
+            device = AIBackend().device
+            if device == "cuda":
                 name = torch.cuda.get_device_name(0)
                 self.gpu_indicator.set_status(name, COLORS['success'])
+                self.gpu_indicator.set_active(True)
+            elif device == "mps":
+                self.gpu_indicator.set_status("Apple GPU (MPS)", COLORS['success'])
                 self.gpu_indicator.set_active(True)
             else:
                 self.gpu_indicator.set_status("CPU Only", COLORS['warning'])
@@ -1465,6 +1475,34 @@ class MainWindow(QMainWindow):
         if not self.workflow_manager.queue:
             self.toast_manager.show_toast("No operations in the workflow queue.", "warning")
             return
+
+        # Configured visual/speech workflows persist the entire queued scope
+        # before execution, so closing/crashing cannot lose the later operation.
+        from core.workspace import Workspace
+        if Workspace.path(self.project_path).exists():
+            try:
+                from core.jobs import JobStore
+                import config
+                tasks = {}
+                for op in self.workflow_manager.queue:
+                    if op.status != OperationStatus.PENDING:
+                        continue
+                    if op.op_type == OperationType.TRANSLATE_AUDIO:
+                        raise ValueError("Durable jobs support visuals and speech. Turn off Translate for this queue.")
+                    tasks.setdefault(op.op_type.value, []).extend(op.file_paths)
+                settings = config._settings.to_dict()
+                settings["mode"] = self.workflow_manager.current_mode
+                files = list(dict.fromkeys(p for paths in tasks.values() for p in paths))
+                import uuid
+                job_id = JobStore(self.project_path).submit(files, list(tasks), settings,
+                            request_key="gui-workflow-" + uuid.uuid4().hex, tasks=tasks)
+                self.run_durable_job(job_id)
+                self.workflow_manager.clear_queue()
+                self.update_workflow_queue_display()
+                self.show_workspace_jobs()
+            except Exception as exc:
+                self.toast_manager.show_toast(str(exc), "error")
+            return
         
         self.workflow_manager.start_workflow()
         self.btn_start_workflow.setEnabled(False)
@@ -1813,6 +1851,7 @@ class MainWindow(QMainWindow):
         # Embedded player
         from gui.embedded_player import EmbeddedPlayerWidget
         self.embedded_player = EmbeddedPlayerWidget()
+        self.embedded_player.project_path = self.project_path
         self.embedded_player.setMinimumHeight(300)
         self.embedded_player.fullscreen_callback = self.open_player_from_tree
         pp_layout.addWidget(self.embedded_player)
@@ -1826,7 +1865,11 @@ class MainWindow(QMainWindow):
 
         self.meta_panel = MetadataPanel()
         self.meta_panel.save_requested.connect(self.save_metadata_handler)
-        pp_layout.addWidget(self.meta_panel)
+        self.metadata_scroll = QScrollArea()
+        self.metadata_scroll.setWidgetResizable(True)
+        self.metadata_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.metadata_scroll.setWidget(self.meta_panel)
+        pp_layout.addWidget(self.metadata_scroll, 1)
 
         self.media_splitter.addWidget(self.preview_panel)
         self.media_splitter.setSizes([900, 400])
@@ -1867,6 +1910,10 @@ class MainWindow(QMainWindow):
         act_export_srt.setShortcut("Ctrl+E")
         act_export_srt.triggered.connect(self.export_srt_handler)
         file_menu.addAction(act_export_srt)
+
+        act_jobs = QAction("Workspace & Jobs…", self)
+        act_jobs.triggered.connect(self.show_workspace_jobs)
+        file_menu.addAction(act_jobs)
         
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
@@ -1947,6 +1994,9 @@ class MainWindow(QMainWindow):
 
     def show_settings(self):
         """Open the settings dialog."""
+        if self.worker is not None or self.background_indexer.is_indexing or self.workflow_manager.is_running:
+            self.toast_manager.show_toast("Pause or finish processing before changing settings. Jobs keep their submitted settings.", "info")
+            return
         import config as _cfg
         from gui.settings_dialog import SettingsDialog
         dlg = SettingsDialog(_cfg._settings, self.project_path, parent=self)
@@ -2067,7 +2117,8 @@ class MainWindow(QMainWindow):
             self.preview_lbl.show()
             
             try:
-                cap = cv2.VideoCapture(file_path)
+                from core.source_state import media_path
+                cap = cv2.VideoCapture(media_path(file_path,self.project_path))
                 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 if total > 0:
                     target_frame = 100 if total > 120 else total // 2
@@ -2226,9 +2277,15 @@ class MainWindow(QMainWindow):
 
     def save_project(self):
         files = self.tree.get_all_file_paths()
-        data = {"version": "2.0", "files": files}
         try:
-            with open(self.project_file, 'w') as f: json.dump(data, f, indent=4)
+            from pathlib import Path
+            from core.workspace_changes import _atomic
+            project_file=Path(self.project_file)
+            if project_file.is_symlink(): raise RuntimeError("Project file cannot be a symbolic link")
+            data=json.loads(project_file.read_text()) if project_file.exists() else {}
+            if not isinstance(data,dict): raise RuntimeError("Existing project data must be an object")
+            data.setdefault("version","2.0");data["files"]=files
+            _atomic(project_file.parent.resolve()/project_file.name,data)
             self.status_label.setText(f"Project saved ({len(files)} files).")
             self.is_dirty = False
             self.setWindowTitle(f"{APP_NAME} - {self.project_name}")
@@ -2308,7 +2365,21 @@ class MainWindow(QMainWindow):
             except: pass
 
     def closeEvent(self, event):
+        # Decide before stopping workers, so Cancel leaves the running app intact.
+        if self.is_dirty:
+            reply = QMessageBox.question(self, "Unsaved Changes", "Save before quitting?", QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+            if reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+            if reply == QMessageBox.StandardButton.Save and not self.save_project():
+                event.ignore()
+                return
         # 1. STOP WORKERS
+        from gui.workspace_jobs_dialog import WorkspaceJobsDialog
+        for dialog in self.findChildren(WorkspaceJobsDialog):
+            verifier=dialog.change_worker
+            if verifier is not None and verifier.isRunning():
+                verifier.requestInterruption();verifier.wait()
         if self.file_watcher and self.file_watcher.isRunning():
             self.file_watcher.stop()
             self.file_watcher.wait(3000)
@@ -2316,18 +2387,32 @@ class MainWindow(QMainWindow):
             self.worker.stop()
             self.worker.wait()
 
+        # The background worker owns the same models as foreground processing.
+        # Stop its timer and join its thread before releasing those models.
+        if hasattr(self, 'background_indexer'):
+            self.background_indexer.shutdown()
+
         # 2. UNLOAD AI
         AIBackend().unload_models()
         
-        # 3. SAVE CHECK
-        if self.is_dirty:
-            reply = QMessageBox.question(self, "Unsaved Changes", "Save before quitting?", QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
-            if reply == QMessageBox.StandardButton.Save:
-                if self.save_project(): event.accept()
-                else: event.ignore()
-            elif reply == QMessageBox.StandardButton.Discard: event.accept()
-            else: event.ignore()
-        else: event.accept()
+        self.db.close()
+        event.accept()
+
+    def show_workspace_jobs(self):
+        from gui.workspace_jobs_dialog import WorkspaceJobsDialog
+        dialog = WorkspaceJobsDialog(self, self.tree.get_checked_file_paths())
+        dialog.exec()
+
+    def run_durable_job(self, job_id):
+        if self.worker is not None or self.background_indexer.is_indexing or self.workflow_manager.is_running:
+            raise RuntimeError("Finish or pause the active workflow before starting this job")
+        from workers.job_worker import DurableJobWorker
+        self.worker = DurableJobWorker(self.project_path, job_id)
+        self.worker.progress_signal.connect(self.update_progress)
+        self.worker.log_signal.connect(self.update_log_status)
+        self.worker.finished.connect(self.worker_finished)
+        self.lock_buttons(True)
+        self.worker.start()
 
     # --- WORKER HANDLERS ---
     def lock_buttons(self, locked):
@@ -2419,8 +2504,20 @@ class MainWindow(QMainWindow):
 
     # --- FILE WATCHER HANDLERS ---
 
+    def _watcher_accepts_source(self, video_path):
+        from core.workspace import Workspace, WorkspaceError
+        if not Workspace.path(self.project_path).exists():
+            return True
+        try:
+            Workspace.load(self.project_path).asset(video_path)
+            return True
+        except (WorkspaceError, OSError):
+            return False
+
     def _on_watched_new_file(self, video_path):
         """A new video file appeared in the project directory."""
+        if not self._watcher_accepts_source(video_path):
+            return
         logger.info(f"File watcher: new file detected — {video_path}")
         self.tree.add_files_flat([video_path])
         self.search_tab.engine.build_index([video_path])
@@ -2432,6 +2529,8 @@ class MainWindow(QMainWindow):
 
     def _on_watched_file_modified(self, video_path):
         """An existing video file was modified in the project directory."""
+        if not self._watcher_accepts_source(video_path):
+            return
         logger.info(f"File watcher: file modified — {video_path}")
         self.background_indexer.add_file(video_path, priority=1, force=True)
         if not self.background_indexer.background_timer.isActive():
@@ -2501,7 +2600,8 @@ class MainWindow(QMainWindow):
             return
         
         # Verify the file still exists and is valid
-        if not os.path.exists(file_path):
+        from core.source_state import media_available
+        if not media_available(file_path,self.project_path):
             return
         
         # Only open player if there's actually a file selected (not when clicking empty space)
@@ -2519,7 +2619,7 @@ class MainWindow(QMainWindow):
             file_path = selected_paths[0]
         
         # Final check: ensure we have a valid file_path
-        if not file_path or not os.path.exists(file_path):
+        if not file_path or not media_available(file_path,self.project_path):
             return
         
         if not self.player_window:
@@ -2530,6 +2630,7 @@ class MainWindow(QMainWindow):
         start_time = 0
         if hasattr(self, 'embedded_player') and hasattr(self.embedded_player, 'media_player') and self.embedded_player.media_player and self.embedded_player.media_player.duration() > 0:
             start_time = self.embedded_player.media_player.position() / 1000.0
+        self.player_window.project_path = self.project_path
         self.player_window.load_video(file_path, start_time)
         self.player_window.show()
 

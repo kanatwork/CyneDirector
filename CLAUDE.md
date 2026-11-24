@@ -1,8 +1,60 @@
 # CLAUDE.md - CyneDirector v2.1.0
 
+## Current execution context — 24 November 2026
+
+The checkout was restored from `kanatwork/CyneDirector` at upstream
+`efd093023c2b30410a5f11553b251e94f69e9f88`. Use [buildplan.md](buildplan.md)
+for current work and [PRD.md](PRD.md) for requirements. The original Gameplan v3
+is archived; it is not the active task order.
+
+**Product scope corrected:** target working video editors on Apple Silicon Macs
+and Windows PCs; Intel Macs are excluded. Phone usage means Codex supervising
+software development, not a CyneDirector mobile experience. Read
+[product discovery](docs/product-discovery.md) and questionnaire answers before
+selecting another feature. The active [build plan](buildplan.md) now begins with
+editor discovery and a full application redesign before workflow completion,
+as explicitly chosen by the user. **36/36 answers** are recorded in
+[product-decisions.json](docs/product-decisions.json). Question 27B confirms a
+search-first home screen with recent results.
+Use inline chat only, never popup forms. Read the [product brief](docs/product-brief.md).
+Fast shot/performance/dialogue retrieval and immediate source review earn daily use;
+grounded story development is the larger promise. Both in-app AI and portable
+context export are launch scope; optional cloud analysis is offered during project
+setup. Launch speech scope is English, including Indian English accents; Hindi,
+multilingual/code-switching and translation requirements are deferred. Preserve
+existing multilingual data/capabilities. Premiere
+markers/selects use tested file interchange; validation starts on the user’s own
+available projects. Add the [GitHub release updater](docs/release-updater.md) to
+packaged desktop delivery. These decisions are requirements, not completed features.
+Whole-app design precedes new workflow completion; no automatic model/framework
+migration or current footage upload is authorized by these questionnaire answers.
+
+The latest [technical audit](docs/audits/2026-11-24-workspace-relinking.md) still
+records valid local implementation/tests. Its 67/100 used the old phone-inclusive
+rubric and is historical. Define a new product rubric after discovery; do not
+inflate a score by removing phone scope. Actual editor utility and Premiere
+acceptance remain unproved. See [models](docs/models.md) for actual loaders,
+cached/tested weights and important context-coverage gaps. The
+[dated candidate review](docs/model-evaluation-2026-11-24.md) checks newer publisher
+releases without installing or choosing a winning model.
+
+This Mac: M4 Pro / 48 GiB, macOS 27.2.1 arm64. Full Python dependencies are
+installed in `.venv` (Python 3.11.18); FFmpeg/FFprobe 9.1 and CMake are available
+through Homebrew. Use `./run.command` to launch, `./setup_macos.sh` to reproduce the
+pinned set in `requirements-macos.lock`. An in-place setup repeat passed. Core
+weights are cached: CLIP/BLIP-large/YOLOv8m use MPS; Whisper small uses CPU/int8.
+The first-run registry/default still requests large-v3; skip that extra download
+and choose small in project settings for the tested configuration. BLIP-2/LLM and
+large-v3 weights were not tested. About 8.2 GiB remains free internally; no wedding
+SSD was mounted. The default 20 GiB reserve correctly blocks this filesystem.
+Choose actual storage/backup paths before wedding processing.
+
 ## What This Project Does
 
-CyneDirector is an AI-powered video management and semantic search desktop application. It indexes video content using vision, audio, and language AI models, then enables natural-language search across the indexed library (e.g., "person running in park"). Target users are video editors, content creators, researchers, and archivists.
+CyneDirector currently implements AI-assisted video indexing and semantic search.
+The accepted product is a footage-search and story-development companion for solo
+editors/small teams, across weddings, fiction, documentaries, commercials and social.
+The complete review/story/AI/export/updater experience remains planned.
 
 **Core capabilities:**
 - Semantic visual search using CLIP embeddings
@@ -11,7 +63,7 @@ CyneDirector is an AI-powered video management and semantic search desktop appli
 - YOLOv8 object detection with bounding boxes
 - Translation of transcripts (DeepL or Whisper-based)
 - LLM-powered video summarization (Llama-3.2 / Phi-3 fallback)
-- Face recognition across videos
+- Face database backend (not yet a complete indexing/search/UI workflow)
 - SRT subtitle export
 - Background incremental indexing
 
@@ -24,7 +76,10 @@ run.bat                  Windows launcher — invokes venv Python directly (avoi
 ```
 
 ### core/ — Business Logic Layer
-No GUI dependencies. Uses singletons for expensive resources. Thread-safe with locks.
+Business logic mixed with Qt adapters: `workflow_manager.py`, `background_indexer.py`,
+and `model_manager.py` import Qt. Extract shared processing services before claiming
+a headless CLI/API. Singletons and locks exist, but complete thread/model ownership
+and worker shutdown are open audit items.
 
 | Module | Purpose |
 |---|---|
@@ -35,7 +90,17 @@ No GUI dependencies. Uses singletons for expensive resources. Thread-safe with l
 | `translator.py` | Language detection and translation (DeepL / Whisper) |
 | `summary_generator.py` | LLM-based video summarization with template fallback |
 | `project_manager.py` | Recent projects, `.cyne` project file management |
-| `workflow_manager.py` | Task queue with priority scheduling, pause/resume |
+| `workflow_manager.py` | Legacy GUI queue builder; configured visual/speech scope is submitted durably before execution |
+| `workspace.py` | Pinned current/historical roots, stable-key → physical IO resolution, FFprobe inventory, capacity/reserve estimates and anchored artifact directories |
+| `workspace_changes.py` | Checksummed preview/apply plans, identity/hash verification, source bindings, stable atomic revisions and old-output preservation |
+| `source_state.py` | Source signatures and processing-scoped resolver context; keep IO paths separate from persistent source keys |
+| `jobs.py` | Additive SQLite job/asset/item/event ledger, idempotency, controls, leases and attempts |
+| `job_runner.py` | Serial orchestration, heartbeats, stage checkpoints, wait/failure/cancel/retry and crash reconciliation |
+| `processing.py` | Lazy shared adapters to existing model algorithms, publication context, cached-model policy |
+| `processing_lock.py` | Local processing ownership and embedded-Chroma project process lock |
+| `memory_budget.py` | Explicit buffer/metadata/record policy, bounded histories, safe overflow |
+| `bounded_speech.py` | Temporary PCM windows, owned decoder cancellation, word-timed source-relative joins |
+| `retention.py` | Additive tracked-generation/artifact catalog, dry-run protection, verified quarantine, restore/pin and delayed purge |
 | `media_engine.py` | FFprobe wrapper for video metadata extraction |
 | `face_db.py` | Face recognition database — SQLite-backed (encodings, names, appearances). Auto-migrates legacy pickle/json on first run |
 | `performance.py` | Dynamic batch sizing based on available RAM, memory monitoring |
@@ -66,6 +131,7 @@ Dark theme UI with configurable accent color (default Indigo `#6366f1`). All hea
 | `shortcuts_panel.py` | Keyboard shortcuts reference |
 | `animations.py` | Reusable QPropertyAnimation helpers (fade, slide, pulse) with reduce-motion support |
 | `model_download_dialog.py` | Pre-download dialog for AI models — shows cache status, progress bars, skip/download |
+| `workspace_jobs_dialog.py` | Workspace setup, durable job submission/status and controls |
 | `settings_dialog.py` | Settings panel — 750x550 modal with 5 category tabs (General, AI/Models, Indexing, Appearance, API Keys), AnimatedToggle, color picker |
 
 #### gui/widgets/ — Reusable Components
@@ -78,10 +144,12 @@ Dark theme UI with configurable accent color (default Indigo `#6366f1`). All hea
 | `thumbnail_card.py` | Grid-view card with thumbnail, filename, status badges, hover shadow |
 
 ### workers/ — Background Processing (QThread)
-Emit PyQt signals for progress/results. Support pause/resume/cancel.
+Emit PyQt signals for progress/results. Cancellation flags and manager pause state
+exist; reliable pause/resume/cancel and truthful per-file outcomes are open W1a work.
 
 | Module | Purpose |
 |---|---|
+| `job_worker.py` | Qt adapter to shared durable JobRunner; GUI close pauses at a file/stage boundary |
 | `indexer.py` | Visual indexing — extracts frames, generates CLIP embeddings/tags, runs YOLOv8 object detection, thumbnail/proxy generation |
 | `transcriber.py` | Audio transcription via Whisper |
 | `transcribe_translate_worker.py` | Combined transcription + translation pipeline |
@@ -90,9 +158,12 @@ Emit PyQt signals for progress/results. Support pause/resume/cancel.
 
 ### Data Flow
 ```
-User Input (GUI) -> WorkflowManager (queue) -> Worker Threads
-  -> AIBackend (model inference) -> Database (SQLite + ChromaDB)
-  -> SearchEngine -> GUI Display
+Configured GUI queue / Workspace & Jobs / cyne_cli
+  -> JobStore (durable scope/settings/items/events)
+  -> JobRunner -> Workspace preflight -> AppProcessor -> existing model algorithms
+  -> Database generation publication + atomic job checkpoint
+  -> JobStore completion -> status/events / GUI
+Legacy watcher/translation and SearchEngine remain separate integration surfaces.
 ```
 
 ### Per-Project File Structure
@@ -102,7 +173,7 @@ project_dir/
   *.mp4, *.mov, ...          # Video files
   _cyne_db/                  # Database folder
     metadata.db              # SQLite
-    chroma_data/             # ChromaDB vector store
+    ...                      # ChromaDB files/collections live directly in _cyne_db/
     faces/                   # Face encodings + names
     indexed_files.json       # Processing tracker
     settings.json            # User settings (persisted by SettingsManager)
@@ -163,7 +234,7 @@ venv\Scripts\python.exe -m tests.smoke_search
 It installs lightweight import stubs for optional heavy dependencies (`torch`, `numpy`,
 and selected `core.*` modules), so it can run in minimal environments.
 
-Coverage (23 tests):
+Coverage (33 tests):
 - **Query operator parsing** — AND/OR/NOT boolean operators, `score:>80` / `score:<50` ranges, `duration:30-60`, `"phrase"` extraction, `field:value` searches
 - **Quoted field values** — validates `dialogue:"hello world"` and mixed operator + field queries
 - **Temporal query return shape** — verifies `_search_temporal_sequence` returns a `dict` (keyed by match type), not a list
@@ -174,7 +245,117 @@ Coverage (23 tests):
 
 Tests use `SearchEngine.__new__()` with fake DB/AI/FaceDB stubs to bypass `__init__` and avoid loading any models.
 
+### Current verification (24 November 2026, local work on efd0930)
+
+Run suites separately (search tests install global stubs); use bash for the
+environment helper:
+
+```bash
+source scripts/macos_env.sh
+.venv/bin/python -m tests.smoke_search
+.venv/bin/python -m unittest tests.test_review_regressions -q
+.venv/bin/python -m unittest tests.test_safe_reprocessing -q
+.venv/bin/python -m unittest tests.test_workspace_jobs -q
+.venv/bin/python -m unittest tests.test_memory_retention -q
+.venv/bin/python -m unittest tests.test_worker_memory -q
+.venv/bin/python -m unittest tests.test_workspace_changes -q
+.venv/bin/python -m tests.memory_retention_benchmark
+.venv/bin/python -m tests.runtime_smoke
+.venv/bin/python -m tests.macos_startup_smoke
+.venv/bin/python -m tests.durable_runtime_smoke
+.venv/bin/python -m tests.workspace_gui_smoke
+.venv/bin/python -m tests.macos_ai_smoke --offline
+```
+
+33 + 23 + 28 + 39 + 41 + 3 + 34 = **201** regression checks pass. The new suite uses real
+SQLite/filesystem/processes and selected real Chroma publications to cover leases,
+actual kill/restart, duplicate submissions, pause/cancel/retry, root disappearance,
+replacement/creation races, capacity grouping, path aliases, future schema rejection
+and publication-before-ledger reconciliation. No models or wedding footage in it.
+
+`durable_runtime_smoke` runs the actual JSON CLI with real cached CLIP/BLIP/YOLO/
+Whisper on generated video/speech, separate workspace derivatives and seeded legacy
+data. It checks hashes, fields, old vectors, generation stamps, three successful
+stages and unchanged attempts on repeat. `workspace_gui_smoke` tests native dialog
+submission with real FFprobe and configured primary queue/Qt ownership; its visual/
+speech publication adapter is a double. The real algorithms are tested separately
+through the CLI. Previous runtime handoff/shutdown and native startup checks pass.
+See the [latest evidence](docs/audits/2026-11-24-workspace-relinking.md).
+
+### Durable jobs and storage
+
+Use `db.publication_context(checkpoint, allowed)` around a durable model stage.
+`reprocess` adds a `{stage}_job_checkpoint` with item, settings, source signature
+and generation to the same metadata transaction as the publication pointer.
+Reconciliation must match every field and the active generation; an old stamp on
+a tombstone is not proof of completion. Never mark a job item complete just because
+a worker thread ended.
+
+`Workspace` config and `jobs.sqlite3` are additive sidecars. Canonicalize only for
+containment/identity; preserve existing metadata source keys (including Mac path
+aliases). `source_key` resolves aliases to the stored key; `media_path`/
+`resolve_source` resolves IO through pinned current roots. Workers normalize keys
+before staging; never hash a new mount path into an existing asset identity.
+`workspace_changes` is the only supported configuration updater: serialize with
+processing/submission, preview/verify, then replace one complete configuration.
+Never mass-rewrite job payloads, vector source fields or `.cyne` files to relink.
+Sources are read-only. New derivatives use pinned, generation-specific
+output namespaces; only explicit verified retention may move/delete tracked old
+artifacts. Managed FFmpeg destinations
+must already exist and are never recursively recreated by its helpers.
+
+`JobStore` is Qt/AI-free; `JobRunner` imports inference adapters lazily. Job
+settings are frozen and API keys excluded. Pause/cancel/retry are durable requests;
+completed work stays recorded. Default request hashes deduplicate repeated CLI
+submissions; new request keys or GUI Force analysis request deliberate reprocessing.
+Configured GUI Start workflow also records an explicit new analysis scope.
+Project process locks prevent a detached Chroma writer opening a GUI-owned project.
+See the [guide](docs/workspace-jobs.md) for command and lifecycle details.
+
+### Generation publication
+
+`core/generations.py` wraps visual/temporal/transcript collections with published
+views. Use `db.reprocess(path, stage, signature, allowed=...)` for worker writes;
+never bypass this with raw vector writes or delete prior generations on retry.
+Stage metadata stays private until one SQLite commit selects its generation.
+Existing records without a generation remain valid legacy data. Metadata uses
+`visual_generation`, `transcript_generation`, `vector_publication_version: 1`.
+New generations/artifacts register before writes and retire in the publication
+transaction. Explicit retention protects current/recent/pinned/job-referenced data;
+verified quarantine precedes deletion and supports recovery. Untracked data stays
+protected. Use the [memory/retention contract](docs/memory-retention.md); never add
+raw delete-on-retry or automatic purge. Reads/publication/retention use the database
+RLock; composed reads use `read_snapshot()`. ANN widening caps at 256 then uses
+paged exact top-k fallback when necessary. Synthetic cost/recovery checks pass;
+whole-library materialization, physical compaction and real scale remain open.
+
+`core/scene_timing.py` stores observed sampled cuts and representative frame times.
+Decoder PTS is preferred; frame/fps fallback is labelled `estimated_cfr`. Do not
+claim exact NLE/SMPTE/VFR timecode precision from sampled scene bounds.
+
 ## Known Issues
+
+- Mac GUI/AI setup, native startup, actual Qt handoff/shutdown, and core inference
+  samples and actual synthetic CLI model processing pass. Packaging, other hardware,
+  physical SSD faults and wedding throughput/quality acceptance remain pending.
+- Generation-aware reads must be used. Earlier builds cannot safely interpret
+  mixed generations; restore a project backup for an older-build rollback.
+- Bounded buffers/windowed speech and explicit retention pass synthetic checks;
+  real long-clip model/native peaks and speech joins still need acceptance. No
+  automatic compaction/quotas, independent embedding jobs/model-version freshness,
+  or project/old-derivative/cache migration yet. Source-root relinking and safe
+  future-destination updates pass. Jobs recover at file/stage boundaries.
+- The legacy combined worker uses bounded transcription but rejects long Whisper
+  translation rather than decode an entire long source. Thumbnail/proxy child
+  cancellation and interactive search/model ownership remain open.
+- Engine query/cache fixes exist; GUI duration/filter/sort/page semantics need work.
+- **Desktop workflow gaps:** legacy translation and automatic watcher queues remain
+  transient; interactive search needs shared model ownership. Prioritize these
+  against the accepted editor journey. Codex phone development is separate from
+  product requirements; see [scope clarification](docs/phone-control.md).
+- **No Premiere selects interchange:** SRT exists; precise selects/sequence export
+  and editing-proxy compatibility remain product/validation backlog. Current H.264 previews are not yet
+  certified for attaching as Premiere editing proxies.
 
 - **Limited export formats** — only SRT currently supported
 - **No undo/redo** functionality in the UI
@@ -182,7 +363,9 @@ Tests use `SearchEngine.__new__()` with fake DB/AI/FaceDB stubs to bypass `__ini
 - **Face recognition** is available but not actively wired into the indexing workflow
 - **Memory risk** with very large video libraries (mitigated by dynamic batch sizing but no streaming yet)
 - **Single-user only** — no collaboration or cloud sync features
-- **RTX 5070 (sm_120)** — torch 2.10+cu126 only supports up to sm_90; needs PyTorch built with CUDA 12.8+ for full GPU support
+- **GPU compatibility:** MPS CLIP/BLIP-large/YOLOv8m samples pass on this M4 Pro
+  with torch 2.11.0. Other GPUs and historical CUDA configurations require fresh
+  validation. Current Mac speech uses CPU/int8; experimental MPS speech is not enabled.
 
 ## Windows DLL Load-Order Fix (`main.py`)
 
@@ -218,7 +401,8 @@ If torch is not installed, the pre-import is silently skipped. Use `run.bat` to 
 
 ### Settings Wiring
 
-Every active setting key in `core/settings_manager.py` is wired to runtime behavior:
+The settings wiring pass is implemented as follows; this table describes code
+paths, not acceptance of every input or the open audit failure cases:
 
 | Setting Key | Wired To | Notes |
 |---|---|---|

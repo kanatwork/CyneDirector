@@ -184,6 +184,35 @@ class WorkflowTests(unittest.TestCase):
 
 
 class WorkerHandoffTests(unittest.TestCase):
+    def test_watcher_cannot_import_generated_workspace_proxy_as_original(self):
+        from core.workspace import Workspace
+        cls = gui_methods("_watcher_accepts_source", "_on_watched_new_file", "_on_watched_file_modified")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project, media, output, models = [root/name for name in ("project","originals","output","models")]
+            for path in (project,media,output,models): path.mkdir()
+            Workspace.configure(project,[media],output,models,1024)
+            original=media/"original.mp4"; original.write_bytes(b"original")
+            generated=output/"preview.mp4"; generated.write_bytes(b"proxy")
+            window=cls(); window.project_path=str(project)
+            window.tree=Mock(); window.background_indexer=Mock(); window.mark_dirty=Mock()
+            self.assertTrue(window._watcher_accepts_source(str(original)))
+            window._on_watched_new_file(str(generated))
+            window._on_watched_file_modified(str(generated))
+            window.tree.add_files_flat.assert_not_called()
+            window.background_indexer.add_file.assert_not_called()
+            window.mark_dirty.assert_not_called()
+
+    def test_settings_cannot_mutate_running_job_snapshot(self):
+        cls = gui_methods("show_settings")
+        window = cls()
+        window.worker = object()
+        window.background_indexer = types.SimpleNamespace(is_indexing=False)
+        window.workflow_manager = types.SimpleNamespace(is_running=False)
+        window.toast_manager = Mock()
+        window.show_settings()
+        window.toast_manager.show_toast.assert_called_once()
+
     def make_window(self):
         cls = gui_methods("worker_finished", "on_translation_file_finished")
         window = cls()
@@ -241,15 +270,20 @@ class DatabaseTests(unittest.TestCase):
         self.addCleanup(self.db.close)
 
     def test_retranscription_invalidates_old_translation(self):
+        from core.source_state import source_signature
+        path = str(Path(self.directory.name) / "vows.mp4")
+        Path(path).write_bytes(b"source")
+        signature = source_signature(path)
         self.db.transcripts = Mock()
-        self.db.update_metadata_key("vows.mp4", "transcript_translated", [{"text": "old translation"}])
-        self.db.update_metadata_key("vows.mp4", "translation_timestamp", 100)
-        self.db.save_transcript("vows.mp4", [{"start": 0, "end": 1, "text": "new vows"}], source_signature=[123, 456])
-        meta = self.db.get_video_metadata("vows.mp4")
+        self.db.update_metadata_key(path, "transcript_translated", [{"text": "old translation"}])
+        self.db.update_metadata_key(path, "translation_timestamp", 100)
+        self.db.save_transcript(path, [{"start": 0, "end": 1, "text": "new vows"}], source_signature=signature)
+        meta = self.db.get_video_metadata(path)
         self.assertNotIn("transcript_translated", meta)
         self.assertNotIn("translation_timestamp", meta)
-        self.assertEqual(meta["transcript_source_signature"], [123, 456])
-        self.db.transcripts.delete.assert_called_once_with(where={"source": "vows.mp4"})
+        self.assertEqual(meta["transcript_source_signature"], signature)
+        self.assertTrue(meta["transcript_generation"])
+        self.db.transcripts.delete.assert_not_called()
 
     def test_write_failure_reaches_caller(self):
         connection = Mock()
@@ -264,13 +298,16 @@ class DatabaseTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Database unavailable"):
                 self.db.update_metadata_key("vows.mp4", "tags", ["bride"])
 
-    def test_clearing_metadata_also_removes_search_vectors(self):
+    def test_clearing_metadata_tombstones_search_vectors(self):
         self.db.visuals = Mock()
         self.db.temporal_sequences = Mock()
         self.db.transcripts = Mock()
         self.db.clear_metadata_keys("vows.mp4", ["tags", "transcript"])
         for name in ("visuals", "temporal_sequences", "transcripts"):
-            getattr(self.db, name).delete.assert_called_once_with(where={"source": "vows.mp4"})
+            getattr(self.db, name).delete.assert_not_called()
+        meta = self.db.get_video_metadata("vows.mp4")
+        self.assertTrue(meta["visual_generation"])
+        self.assertTrue(meta["transcript_generation"])
 
 
 if __name__ == "__main__":

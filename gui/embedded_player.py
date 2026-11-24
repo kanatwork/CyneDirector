@@ -152,7 +152,8 @@ class EmbeddedPlayerWidget(QWidget):
         self.media_player.setPlaybackRate(1.0)
         self.update_speed_label()
 
-        source = QUrl.fromLocalFile(file_path)
+        from core.source_state import media_path
+        source = QUrl.fromLocalFile(media_path(file_path,getattr(self,"project_path",None)))
         self.media_player.setSource(source)
         
         if start_time_sec > 0:

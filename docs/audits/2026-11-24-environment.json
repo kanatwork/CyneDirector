@@ -1,0 +1,34 @@
+{
+  "audit_date": "2026-11-24",
+  "timezone": "Asia/Kolkata",
+  "repository": "https://github.com/kanatwork/CyneDirector.git",
+  "checkout": "/Users/kanishkar/Desktop/The Tools/CyneDirector",
+  "baseline_commit": "112388b25d7265ebb85d50ecf97604b920e9ca1b",
+  "python": "3.9.6",
+  "architecture": "arm64",
+  "free_disk_gib": 15.4,
+  "dependencies_on_current_python": {
+    "PyQt6": false,
+    "torch": false,
+    "transformers": false,
+    "faster_whisper": false,
+    "chromadb": false,
+    "cv2": false,
+    "PIL": false,
+    "numpy": false,
+    "psutil": false,
+    "watchdog": false,
+    "face_recognition": false,
+    "deepl": false
+  },
+  "executables_on_path": {
+    "ffmpeg": null,
+    "ffprobe": null,
+    "python3.11": null,
+    "python3.12": null,
+    "uv": null
+  },
+  "real_media_run": false,
+  "phone_pairing_verified": false,
+  "premiere_round_trip_verified": false
+}

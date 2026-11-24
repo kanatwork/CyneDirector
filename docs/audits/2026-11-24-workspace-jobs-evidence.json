@@ -1,0 +1,248 @@
+{
+  "date": "2026-11-24",
+  "timezone": "Asia/Kolkata",
+  "upstream_commit": "efd093023c2b30410a5f11553b251e94f69e9f88",
+  "branch": "codex/wedding-workflow-plan",
+  "changes": "local, uncommitted, not pushed",
+  "regressions": [
+    {
+      "module": "tests.smoke_search",
+      "passed": 33,
+      "skipped": 0,
+      "exit_code": 0,
+      "log_sha256": "44cc610fb361aca8d6ef699c92159d35a97d1fe9481df668ac1d7dabb962ca04"
+    },
+    {
+      "module": "tests.test_review_regressions",
+      "passed": 23,
+      "skipped": 0,
+      "exit_code": 0,
+      "log_sha256": "07a17b28a6c7287a4ebe164c6f2c38ea2cd62791ffdefc9da997c85e0471a68d"
+    },
+    {
+      "module": "tests.test_safe_reprocessing",
+      "passed": 28,
+      "skipped": 0,
+      "exit_code": 0,
+      "log_sha256": "f2512e5f7c4c6ce3b009f7c68b5ddca15d30d137694fe86b231e96ed60afbce7"
+    },
+    {
+      "module": "tests.test_workspace_jobs",
+      "passed": 39,
+      "skipped": 0,
+      "exit_code": 0,
+      "log_sha256": "442d231235878c93c56701b5f555b1bf837265696912d862c1784918021605e7"
+    }
+  ],
+  "regression_total": 123,
+  "actual_cli_pipeline": {
+    "state": "completed",
+    "counts": {
+      "completed": 3
+    },
+    "transcript": "On our wedding day, I promise to stand by your side.",
+    "visual_generation": "5553023c81da41e793bfa6ba65f5693d",
+    "transcript_generation": "017db4fe9cfe4995a4d3b8e29e4b62f6",
+    "visual_vectors": 6,
+    "transcript_vectors": 1,
+    "original_and_project_hashes_preserved": true,
+    "legacy_field_and_vector_preserved": true,
+    "derivatives_in_selected_workspace": true,
+    "test_reserve_bytes": 67108864,
+    "actual_cli_inference_stdout_is_json": true,
+    "production_default_preflight_ok": false,
+    "production_default_capacity": [
+      {
+        "paths": [
+          "/private/var/folders/rn/nkcg4d597y32f0d_q4fmtxbr0000gp/T/cyne-real-job-8c0dvuc2/project",
+          "/private/var/folders/rn/nkcg4d597y32f0d_q4fmtxbr0000gp/T/cyne-real-job-8c0dvuc2/generated",
+          "/Users/kanishkar/Desktop/The Tools/CyneDirector/.cache/huggingface"
+        ],
+        "estimated_additional_bytes": 16777216,
+        "free_bytes": 9262538752,
+        "reserve_bytes": 21474836480,
+        "required_bytes": 21491613696,
+        "ok": false
+      }
+    ],
+    "events": 45,
+    "attempts_after_repeat": [
+      1,
+      1,
+      1
+    ]
+  },
+  "native_jobs_gui": {
+    "platform": "cocoa",
+    "native_dialog": "rendered and fits display",
+    "inventory_job": "completed",
+    "counts": {
+      "completed": 1
+    },
+    "worker_retired": true,
+    "configured_gui_queue": "completed",
+    "queue_counts": {
+      "completed": 2
+    },
+    "queue_test_uses_publication_adapter_double": true,
+    "stage_scopes_preserved": true,
+    "qt_errors": []
+  },
+  "native_startup": {
+    "stages": [
+      "welcome rendered",
+      "model dialog rendered; downloads skipped",
+      "main window rendered"
+    ],
+    "errors": [],
+    "platform": "cocoa"
+  },
+  "other_checks": [
+    {
+      "module": "tests.runtime_smoke",
+      "exit_code": 0,
+      "kind": "real Qt/storage/FFmpeg; short AI worker doubles"
+    },
+    {
+      "command": ".venv/bin/python -m pip check",
+      "exit_code": 0,
+      "result": "No broken requirements found."
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/private/tmp/cyne-jobs-pycache .venv/bin/python -m compileall -q core gui workers tests main.py config.py cyne_cli.py",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n cyne.command run.command setup_macos.sh scripts/macos_env.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "git -c core.whitespace=cr-at-eol diff --check",
+      "exit_code": 0,
+      "note": "Existing background_indexer.py retains CRLF"
+    }
+  ],
+  "score": {
+    "previous": 60,
+    "current": 65,
+    "out_of": 100,
+    "kind": "engineering judgment for wedding/Premiere/phone workflow",
+    "dimensions": {
+      "media_integrity_recovery": [
+        22,
+        25
+      ],
+      "finding_moments": [
+        18,
+        20
+      ],
+      "premiere": [
+        2,
+        20
+      ],
+      "phone": [
+        6,
+        15
+      ],
+      "setup_compatibility": [
+        8,
+        10
+      ],
+      "validation_delivery": [
+        9,
+        10
+      ]
+    }
+  },
+  "preservation": {
+    "real_wedding_footage_accessed": false,
+    "existing_user_project_opened": false,
+    "wedding_ssd_mounted": false,
+    "destructive_legacy_migration": false,
+    "source_files_moved_or_written": false,
+    "fixtures": "temporary generated videos/speech and disposable seeded legacy metadata/vectors; original and .cyne hashes checked",
+    "temporary_artifacts_removed": true,
+    "verification_logs_screenshot_kept": ".cache/durable-verification"
+  },
+  "environment": {
+    "python": "3.11.18 (main, Oct 25 2026, 19:41:29) [Clang 21.0.0 (clang-2100.3.34.2)]",
+    "executable": "/Users/kanishkar/Desktop/The Tools/CyneDirector/.venv/bin/python",
+    "architecture": "arm64",
+    "macos": "27.2.1",
+    "hardware": "Apple M4 Pro",
+    "memory_bytes": 51539607552,
+    "qt": "6.8.2",
+    "pyqt": "6.8.1",
+    "packages": {
+      "torch": "2.11.0",
+      "torchvision": "0.26.0",
+      "transformers": "4.57.6",
+      "faster-whisper": "1.2.1",
+      "ctranslate2": "4.9.1",
+      "chromadb": "0.4.24",
+      "numpy": "1.26.4",
+      "opencv-python": "4.11.0.86",
+      "ultralytics": "8.4.218",
+      "dlib": "20.0.1",
+      "face-recognition": "1.3.0",
+      "face_recognition_models": "0.3.0",
+      "setuptools": "80.10.2",
+      "posthog": "3.25.0"
+    },
+    "ffmpeg": "ffmpeg version 9.1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "ffprobe": "ffprobe version 9.1 Copyright (c) 2007-2026 the FFmpeg developers",
+    "ffmpeg_path": "/opt/homebrew/bin/ffmpeg",
+    "ffprobe_path": "/opt/homebrew/bin/ffprobe",
+    "cmake": "cmake version 4.5.1",
+    "volumes": [
+      "Recovery",
+      "Macintosh HD"
+    ],
+    "pip_check": "No broken requirements found.",
+    "internal_free_bytes_at_prior_environment_capture": 9300152320,
+    "internal_free_gib_at_prior_environment_capture": 8.66
+  },
+  "current_internal_free_bytes": 9256960000,
+  "observed_volumes": [
+    "Recovery",
+    "Macintosh HD"
+  ],
+  "limitations": [
+    "Physical SSD removal/remount, exFAT/other filesystems and hardware faults not certified; directory simulations on this Mac only",
+    "No actual wedding/800 GB, language/quality/throughput or long-clip memory trial",
+    "Frame/scene/keyframe/tag/transcript memory budgets, generation GC/query cost, root relinking/config editing pending",
+    "Some inference algorithms still Qt worker classes behind shared adapters; legacy watcher/translation not durable",
+    "Interactive search/model coordination and active FFmpeg child termination pending",
+    "GUI quit pauses/joins; CLI detaches from launcher; no automatic boot dispatcher",
+    "No actual phone pairing/preview or Premiere exchange",
+    "Optional models/translations and Windows/packaging not tested here",
+    "Local-only model options verified, not OS-enforced network-isolation testing"
+  ],
+  "source_sha256": {
+    "core/workspace.py": "b0b58002b7eb2d638eb9355432b7cf2eac4d3ee7d481cde850b5b06d16fb6423",
+    "core/jobs.py": "fe37984e02bea3a36e2fe38d26cff6a277560f71a677cfc16f0cec4e5d41edba",
+    "core/job_runner.py": "ec1eae2c3fcde690466a0a372640f294dbfe3f3e214d7d86fbf7320f4e1c103b",
+    "core/processing.py": "0dccbb165bbd0574c2fcfcefb6254dad8f166c6e6bfccc97a319ad500b269f9b",
+    "core/processing_lock.py": "4de04eb15a5e5c9ff2031d6343fb605adc3166486ce6d437bdae576795274a35",
+    "core/database.py": "32fecdbee33d49a1ddbe98b198e2fe592b9d21f247b8a39354cf0ea981aa79e6",
+    "core/generations.py": "73a5bdd3d2c2f74e6c1f94db155b636ecc1f6c0e098f99d3f5fb566007fe5eb1",
+    "core/proxy_generator.py": "793334c8828c72b73a9af477e61d78f3e81ca4dfd021f31715e78e8a570a4793",
+    "core/ai_models.py": "8597e4eefe773367e41f5bd32e8411f22f1a23e2f5ba9965a6d7d3f6bec9b10d",
+    "workers/indexer.py": "c0e0d7f18aa785e6479990ad02709fae629d42144ff7d0af2e8727ef53d43014",
+    "workers/transcriber.py": "8542c9ba4ca02c383e6c66074a6d8c31acf641dd9b07b757a3c8bbcdf3bb25ba",
+    "workers/transcribe_translate_worker.py": "3d9af70a6f01355e498a0b6eeb45b18e243584af778d85b251c78a221f437a85",
+    "workers/job_worker.py": "99a22dffca21d99e9b705a563b88b41cf98fbad0d62c1833d4b7c534fd369e88",
+    "gui/main_window.py": "da587ff15b1ffe6de9fb1e32d0a54a3fc8034bf2629b678374c68f9de6be471c",
+    "gui/workspace_jobs_dialog.py": "75c871af12f3f6f51ce59c102918f6f716a0e9cecbbb2777ddf95c0a68541e9c",
+    "cyne_cli.py": "c7bd7b6e7683e5e1e724210562ebfe37a4ffed22adc98165c289bf456f276a2f",
+    "cyne.command": "09e64cdce062612aee207ae183c1c3d3d58eaa7bae0e779e58ace93495e46051",
+    "tests/test_workspace_jobs.py": "99388469d1e02ff959bc693b32c7e49d6238368e4eb30b977f759ec751199bb1",
+    "tests/durable_runtime_smoke.py": "75ae569e38aa7e220bb085abf5802da9781ca2e35a79f117f89f4524789ce0c5",
+    "tests/workspace_gui_smoke.py": "271b4163e8633ca0ba09e79c3249706a8719dee573268db9403c73be65c5b94f",
+    "tests/test_safe_reprocessing.py": "8c99d6f6c87d77e8198afa9b4e67d9aa1895be840d2d15daa6fdbd7b634731f4",
+    "tests/runtime_smoke.py": "b57086797fb6eefa9cdf406c028d7b91b0ccfeb1b75d6d47b59d045e8fcf3f71",
+    "tests/macos_startup_smoke.py": "5122f66b62ab6593e41c912efe740540ea4cdd89d12c523c0d3d2b39f38f58d5",
+    "requirements-macos.lock": "60c1fc3dfddc1447c32eb88d598b2e69f64b8f8b076459286c5ee77125eda698",
+    "tests/test_review_regressions.py": "c85369437c73bfb2a9232076c169f80ff6933e40f541ff99b4a4d21fa736f4c5"
+  }
+}

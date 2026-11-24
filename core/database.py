@@ -4,14 +4,18 @@ import json
 import os
 import threading
 import time
+import uuid
+from contextlib import contextmanager
 import chromadb
 from core.logger import get_logger
+from core.generations import PublishedCollection, StageUpdate
+from core.source_state import source_signature as get_source_signature
 
 logger = get_logger(__name__)
 
 class Database:
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __new__(cls, project_path=None):
         if cls._instance is None:
@@ -21,15 +25,21 @@ class Database:
             cls._instance._local = threading.local()
             cls._instance._connections = []
             cls._instance._conn_lock = threading.Lock()
+            cls._instance._active_generations = set()
         return cls._instance
 
     def initialize(self, project_path):
         logger.debug(f"Initializing database for project: {project_path}")
+        if getattr(self, "sqlite_path", None) and self.project_path != project_path:
+            self.close()
         self.project_path = project_path
         
         # 1. Setup Main DB Folder
         db_path = os.path.join(project_path, "_cyne_db")
         os.makedirs(db_path, exist_ok=True)
+        if not getattr(self, "_session", None):
+            from core.processing_lock import ProjectSession
+            self._session = ProjectSession(os.path.join(db_path, "data-session.lock"))
         logger.debug(f"Database folder created: {db_path}")
         
         # 2. Initialize SQLite for Metadata (Replaces JSON Sidecars)
@@ -103,6 +113,10 @@ class Database:
             # Temporal sequences are optional, so don't fail if they can't be created
             self.temporal_sequences = None
         
+        for name, stage in (("visuals", "visual"), ("temporal_sequences", "visual"), ("transcripts", "transcript")):
+            raw = getattr(self, name, None)
+            if raw is not None:
+                setattr(self, name, PublishedCollection(raw, self, stage))
         logger.info("Database initialization completed successfully")
 
     def _init_sqlite(self):
@@ -122,6 +136,8 @@ class Database:
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_path ON video_metadata(video_path)")
         conn.commit()
+        from core.retention import initialize
+        initialize(self)
 
     def _get_conn(self):
         """Return a thread-local SQLite connection with WAL mode enabled."""
@@ -140,6 +156,7 @@ class Database:
 
     def _get_data(self, video_path):
         """Internal: Fetch metadata dict from SQLite. Caller must hold _lock."""
+        video_path=self.source_key(video_path)
         try:
             conn = self._get_conn()
             cursor = conn.execute("SELECT json_data FROM video_metadata WHERE video_path = ?", (video_path,))
@@ -153,12 +170,17 @@ class Database:
 
     def _save_data(self, video_path, data):
         """Internal: Save metadata dict to SQLite. Caller must hold _lock."""
+        video_path=self.source_key(video_path)
         if "last_scanned" not in data:
             data["last_scanned"] = time.time()
-        json_str = json.dumps(data)
+        publication = getattr(self._local, "generation_publication", None)
+        if publication:
+            publication["policy"].validate(data)
+        json_str = json.dumps(data,ensure_ascii=not bool(publication),allow_nan=not bool(publication))
         conn = None
         try:
             conn = self._get_conn()
+            prior = conn.execute("SELECT json_extract(json_data,'$.visual_generation'),json_extract(json_data,'$.transcript_generation') FROM video_metadata WHERE video_path=?",(video_path,)).fetchone()
             conn.execute("""
                 INSERT INTO video_metadata (video_path, last_scanned, json_data)
                 VALUES (?, ?, ?)
@@ -166,6 +188,15 @@ class Database:
                     last_scanned = excluded.last_scanned,
                     json_data = excluded.json_data
             """, (video_path, data["last_scanned"], json_str))
+            if publication:
+                now = time.time()
+                conn.execute("UPDATE generation_records SET state='published',published=? WHERE generation=?", (now,publication["generation"]))
+                if publication["previous"]:
+                    conn.execute("UPDATE generation_records SET state='retired',retired=? WHERE generation=? AND state='published'", (now,publication["previous"]))
+            elif prior:
+                for index,stage in enumerate(("visual","transcript")):
+                    if prior[index] and prior[index]!=data.get(stage+"_generation"):
+                        conn.execute("UPDATE generation_records SET state='retired',retired=? WHERE generation=? AND state='published'",(time.time(),prior[index]))
             conn.commit()
         except Exception as e:
             if conn is not None:
@@ -181,6 +212,42 @@ class Database:
         with self._lock:
             return self._get_data(video_path)
 
+    def source_key(self,path):
+        from core.workspace import Workspace,WorkspaceError
+        project=getattr(self,"project_path",None)
+        if project and Workspace.path(project).is_file():
+            try:
+                stat=Workspace.path(project).stat();stamp=(project,stat.st_ino,stat.st_mtime_ns,stat.st_size)
+                if getattr(self,"_source_workspace_stamp",None)!=stamp:
+                    self._source_workspace=Workspace.load(project,check=False);self._source_workspace_stamp=stamp
+                return self._source_workspace.source_key(path)
+            except WorkspaceError as exc:
+                if exc.code!="unsafe_source": raise
+        return path
+
+    def media_path(self,path):
+        from core.source_state import media_path
+        return media_path(path,getattr(self,"project_path",None))
+
+    def get_bounded_video_metadata(self, video_path, policy):
+        with self._lock:
+            video_path=self.source_key(video_path)
+            row = self._get_conn().execute("""SELECT length(CAST(json_data AS BLOB)),
+                CASE WHEN length(CAST(json_data AS BLOB))<=? THEN json_data ELSE NULL END
+                FROM video_metadata WHERE video_path=?""", (policy.metadata_bytes, video_path)).fetchone()
+            if row and row[1] is None:
+                from core.memory_budget import MemoryBudgetExceeded
+                raise MemoryBudgetExceeded("Existing metadata exceeds processing budget; existing data left unchanged")
+            value = json.loads(row[1]) if row else {}
+            policy.validate(value)
+            return value
+
+    @contextmanager
+    def read_snapshot(self):
+        """Keep publication/retention from advancing during composed vector reads."""
+        with self._lock:
+            yield
+
     def save_tags(self, video_path, tags, summary_text):
         with self._lock:
             data = self._get_data(video_path)
@@ -195,18 +262,28 @@ class Database:
             self._save_data(video_path, data)
 
     def save_transcript(self, video_path, transcript_list, source_signature=None):
-        with self._lock:
-            collection = getattr(self, "transcripts", None)
-            if collection is not None:
-                collection.delete(where={"source": video_path})
-            data = self._get_data(video_path)
-            data["transcript"] = transcript_list
-            for key in ("transcript_translated", "translation_timestamp", "translation_method",
-                        "translation_source_signature", "transcript_source_signature"):
-                data.pop(key, None)
-            if source_signature is not None:
-                data["transcript_source_signature"] = source_signature
-            self._save_data(video_path, data)
+        signature = source_signature if source_signature is not None else get_source_signature(self.media_path(video_path))
+        with self.reprocess(video_path, "transcript", signature) as staged:
+            staged.save_transcript(video_path, transcript_list)
+
+    def reprocess(self, path, stage, signature, allowed=lambda: True):
+        path=self.source_key(path)
+        publication = getattr(self._local, "publication", None)
+        predicate = (lambda: allowed() and publication[1]()) if publication else allowed
+        update = StageUpdate(self, path, stage, signature, predicate)
+        if publication:
+            update.update_metadata_key(path, stage + "_job_checkpoint", dict(publication[0], generation=update.generation))
+        return update
+
+    @contextmanager
+    def publication_context(self, checkpoint, allowed):
+        """Commit the job checkpoint in the SAME metadata publication transaction."""
+        previous = getattr(self._local, "publication", None)
+        self._local.publication = (checkpoint, allowed)
+        try:
+            yield
+        finally:
+            self._local.publication = previous
 
     def ensure_segment_languages(self, video_path):
         """Ensure all transcript segments have language detection.
@@ -242,26 +319,25 @@ class Database:
 
     def clear_metadata_keys(self, video_path, keys_to_remove):
         with self._lock:
-            if "transcript" in keys_to_remove:
-                collection = getattr(self, "transcripts", None)
-                if collection is not None:
-                    collection.delete(where={"source": video_path})
-            if "tags" in keys_to_remove:
-                self.clear_visual_embeddings(video_path)
             data = self._get_data(video_path)
-            changed = False
+            if "transcript" in keys_to_remove:
+                data["transcript_generation"] = uuid.uuid4().hex
+                data.pop("transcript_source_signature", None)
+            if "tags" in keys_to_remove:
+                data["visual_generation"] = uuid.uuid4().hex
+                data.pop("visual_source_signature", None)
             for key in keys_to_remove:
-                if key in data:
-                    del data[key]
-                    changed = True
-            if changed:
-                self._save_data(video_path, data)
+                data.pop(key, None)
+            self._save_data(video_path, data)
 
     def clear_visual_embeddings(self, video_path):
-        for name in ("visuals", "temporal_sequences"):
-            collection = getattr(self, name, None)
-            if collection is not None:
-                collection.delete(where={"source": video_path})
+        # A metadata tombstone hides all old generations atomically. Retain the
+        # physical records so concurrent readers of an earlier snapshot stay safe.
+        with self._lock:
+            data = self._get_data(video_path)
+            data["visual_generation"] = uuid.uuid4().hex
+            data.pop("visual_source_signature", None)
+            self._save_data(video_path, data)
 
     def add_visual_embeddings(self, video_path, vectors, timestamps):
         # OPTIMIZATION: Batch ChromaDB writes for better performance
@@ -314,3 +390,8 @@ class Database:
                     pass
             self._connections.clear()
         self._local = threading.local()
+        self.client = None
+        self._active_generations.clear()
+        if getattr(self, "_session", None):
+            self._session.close()
+            self._session = None

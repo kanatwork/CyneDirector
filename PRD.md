@@ -1,27 +1,70 @@
-# PRD.md — CyneDirector Beta Product Requirements
+# PRD.md — CyneDirector Product Requirements and Backlog
+
+**Scope corrected 24 November 2026:** CyneDirector targets video editors on
+Apple Silicon Macs and Windows PCs. Intel Macs and a CyneDirector mobile UI are
+outside scope. Phone use means Codex supervising development. **All 36 questions
+are answered; 27B confirms search and recent results on the home screen.** Use inline chat, never popup forms.
+The [product brief](docs/product-brief.md) defines accepted launch scope;
+[discovery](docs/product-discovery.md) distinguishes answers from recommendations.
+Next produce the full application redesign and revised success metrics. Existing
+implementation details below remain a backlog inventory, not evidence of completion.
 
 ## 1. Document Control
 
 - **Product:** CyneDirector v2.1.0
-- **Stage:** Beta execution (post-Phase 5.1 baseline)
+- **Stage:** Prototype; 36 product decisions confirmed, full application redesign next
 - **Owner:** Product + Engineering
-- **Last updated:** 2026-02-17
+- **Last updated:** 2026-11-24
 - **Architecture reference:** See `CLAUDE.md` for full technical architecture, module map, and development conventions.
+- **Execution:** [buildplan.md](buildplan.md) supersedes the historical Gameplan v3.
+- **Evidence:** [24 November workspace/relink verification](docs/audits/2026-11-24-workspace-relinking.md), local work on upstream `efd0930`; historical **67/100** under the superseded wedding/Premiere/phone rubric. Product readiness will be redefined after discovery.
+
+Requirements and metrics below are acceptance targets, not claims that the current
+implementation passes them. Compilation and 201 regressions pass, along with native
+Mac startup/jobs GUI, Qt/storage/FFmpeg integration, and real cached-model CLI processing. Wedding
+media, editor utility, Premiere, other hardware, and installed-package acceptance remain pending.
 
 ## 2. Product Vision
 
-CyneDirector is a desktop AI video intelligence tool that makes large media libraries searchable by meaning, dialogue, objects, and people — while staying usable for real editor workflows. All processing runs locally; no cloud account or upload required.
+Confirmed vision from questions 1–6: CyneDirector is a desktop companion for solo
+editors and small teams making story-led films. Its promise is understanding raw
+footage and developing a story grounded in it. Launch support covers weddings,
+fiction, documentaries, commercials and social content equally. The NLE handoff
+is reliable file-based exchange with Premiere.
+
+The user selected a **full application redesign before completing a workflow**.
+The first valuable result is an evidence-linked footage brief and usable paper edit.
+The complete design must accommodate all five genres, rather than use a wedding
+workflow as the product's implicit default. Kanishkar's approximately 800 GB wedding
+is one intended real project. Fast retrieval of a shot, performance or spoken line
+is the immediate pain; source-grounded story development is the larger promise.
+The agreed journey spans project/creative brief, progressive coverage, synchronized
+review and corrections, both in-app AI and portable context packs, paper edit,
+reviewed Premiere handoff and related film versions.
+
+CyneDirector targets Apple Silicon Macs and Windows PCs. Codex from a phone is a
+separate development workflow. Optional cloud analysis is offered during project
+setup; provider, data scope and cost interactions remain to be designed. English speech,
+including Indian English accents, is the launch requirement. Hindi and multilingual/
+code-switching/translation requirements are deferred; preserve existing data.
+Validation begins on the user’s own available projects. A GitHub release updater
+is accepted delivery scope, currently unimplemented. The
+[dated model review](docs/model-evaluation-2026-11-24.md) is research, not an installed
+replacement stack or proof of a measured quality win.
 
 ## 3. Problem Statement
 
-Video teams lose hours manually locating moments across large libraries. Filename and folder search is insufficient for scene-level retrieval and spoken-content discovery. Existing cloud solutions require uploading sensitive footage and ongoing subscriptions. There is no local-first tool that combines visual, audio, and object-level search in a single interface.
+Editors spend time locating particular images, performances and spoken lines,
+then reconstructing enough context to form a story. Filenames and disconnected
+logs do not convey the available coverage. CyneDirector must reduce that review
+effort and produce useful story evidence with inspectable source references.
 
 ## 4. Target Users
 
-- **Video editors** managing large project archives (hundreds to thousands of files)
-- **Content teams** reusing clips across channels and campaigns
-- **Researchers and analysts** searching long-form footage for specific moments
-- **Solo creators** needing quick retrieval without cloud lock-in or subscription costs
+- **Primary:** Solo editors and small teams making story-led films.
+- **Equal launch genres:** Weddings, fiction, documentaries, commercials and social.
+- **Initial validation:** Kanishkar’s own available projects, including the wedding.
+- **Editing environment:** Premiere first, portable records for Resolve next.
 
 ## 5. Goals
 
@@ -30,18 +73,21 @@ Video teams lose hours manually locating moments across large libraries. Filenam
 - **G3 — Predictable search experience:** Filters, sort, and pagination behave consistently across repeated searches. The same query returns the same results.
 - **G4 — Multi-modal retrieval:** Users can find footage by visual similarity, spoken dialogue, detected objects, and temporal context — individually or combined.
 - **G5 — Hardware-adaptive stability:** The app runs reliably on CUDA (Windows), MPS (macOS), and CPU-only systems, automatically selecting the best available backend.
+- **G6 — Useful Premiere handoff:** Reviewed source ranges become a tested selects sequence with correct source frames, audio, and original-media relinking.
+- **G7 — Editor confidence:** Editors can see analysis progress/coverage, inspect evidence, correct mistakes and recover safely. Exact workflow and acceptance targets follow product discovery.
 
 ## 6. Non-Goals (Current Beta Window)
 
 - Multi-user collaboration or cloud sync
-- Full timeline editing or NLE integration
+- Full timeline editing, multicam synchronization, color grading, sound mixing, and autonomous final-film delivery; these remain in Premiere
 - Advanced permissions or role-based access
-- Export formats beyond SRT subtitles and transcript reports
-- Linux support (untested; not blocked but not validated)
+- Broad interchange support beyond the narrow, tested Premiere selects contract
+- Intel Mac and Linux support
+- A CyneDirector mobile UI, phone processing control, phone preview delivery or custom remote product API
 
 ## 7. Scope
 
-### 7.1 In Scope (Beta)
+### 7.1 Existing Implementation Surface (requires hardening/validation)
 
 - Project creation/open, `.cyne` project files, and media import
 - Background indexing pipeline (CLIP embeddings, BLIP captions, YOLO object detection, Whisper transcription)
@@ -61,11 +107,25 @@ These features have backend implementation but are not wired into the standard u
 - **Face recognition:** `core/face_db.py` stores encodings and names with auto-migration from legacy formats. Not yet integrated into the indexing pipeline or search results.
 - **LLM summarization:** `core/summary_generator.py` generates summaries via Llama-3.2 / Phi-3 fallback. Currently runs only during transcription in accuracy mode; no standalone trigger.
 
-### 7.3 Next Scope — Not Started
+### 7.3 Editor Workflow and Safety — Mixed Implementation Status
+
+- Implemented locally: per-file generation publication, source checks, sampled scene timing, and durable file/stage jobs with publication/ledger reconciliation
+- Implemented: explicit pinned media/cache/output roots, filesystem capacity/reserve checks, offline/replaced-root waits and stable root/relative asset IDs
+- Implemented: bounded clip buffers/windowed speech and explicit tracked-generation inspection, verified quarantine, restore/pinning and delayed purge; see [limits](docs/memory-retention.md)
+- Implemented: verified different-path source-root relinking, stable legacy source keys/asset IDs, atomic workspace revisions, GUI/CLI preview/apply, future-output/model/reserve updates and offline/custom-field project-save preservation
+- Planned: physical database compaction and explicit project/cache/old-derivative migrations; real long-media/SSD acceptance remains open
+- Planned: editable virtual scenes/events/topics/takes and timestamped reviewed selects
+- A narrow Premiere-compatible selects export and verified editing-proxy workflow
+- Implemented local JSON job/control commands and native Workspace & Jobs GUI using shared orchestration; these serve desktop reliability, not a phone-product requirement
+- Accepted, planned: source-linked context export and in-app AI with original dialogue, timed observations, coverage gaps, corrections, a creative brief and paper edits
+- Accepted, planned: English speaker review (including Indian English accents) and synchronized player/filmstrip/transcript
+- Accepted, planned: optional cloud setup, related film versions and safe release updates
+
+### 7.4 Deferred Scope
 
 - OCR / text-in-video retrieval
 - Offline drive metadata and online/offline result state
-- Virtual collections and production tag workflows
+- Extensive tag management beyond the wedding event/selects collections
 - Light theme
 - Undo/redo in UI
 
@@ -85,8 +145,8 @@ These features have backend implementation but are not wired into the standard u
   - BLIP scene captions (stored in SQLite metadata)
   - YOLOv8 object detections with bounding boxes (80 COCO classes, 0.4 confidence threshold)
 - FR-2.3: Indexing optionally generates 720p proxy videos and 320x180 thumbnail JPEGs (controlled by settings).
-- FR-2.4: Incremental indexing skips files unchanged since `last_scanned` timestamp.
-- FR-2.5: Batch size is configurable ("auto" uses RAM-based dynamic sizing via `core/performance.py`, or user-specified 1–128).
+- FR-2.4: Incremental processing skips a stage only when its input fingerprint and settings/model version match a committed successful result. Stage-specific source signatures now exist; durable jobs snapshot settings and support explicit new analyses; automatic freshness by model/algorithm version and independent embedding completion remain planned.
+- FR-2.5: Batch size is configurable ("auto" uses RAM-based dynamic sizing via `core/performance.py`, or user-specified 1–128), clamped by the processing policy to at most 32 frames. Metadata/record limits fail without publishing partial replacements; speech uses bounded PCM windows. This is not an OS/model-memory cap.
 - FR-2.6: File watcher detects new or modified files and triggers re-indexing when `auto_index_on_change` is enabled.
 
 ### FR-3 Search
@@ -96,7 +156,7 @@ These features have backend implementation but are not wired into the standard u
 - FR-3.3: Search supports field-specific filters: `visual:`, `dialogue:`, `objects:`, `cast:`.
 - FR-3.4: Search supports range filters: `score:>80`, `score:<50`, `duration:30-60`.
 - FR-3.5: Search supports temporal sequence queries (e.g., "A then B").
-- FR-3.6: Results are paginated (50 per page) with a 5-minute TTL cache.
+- FR-3.6: Results are filtered and stably sorted before pagination (50 per page). A 5-minute cache is invalidated by relevant metadata/generation changes and keyed by search options.
 - FR-3.7: Filter checkboxes (VISUAL, DIALOGUE, OBJECT, CAST, TEMPORAL SEQUENCE, MULTI-MODAL) control which match types appear in results.
 - FR-3.8: Sort options (Relevance, Filename) produce stable, deterministic ordering.
 - FR-3.9: Multi-modal results correctly reflect their constituent match types for filtering.
@@ -125,6 +185,55 @@ These features have backend implementation but are not wired into the standard u
 - FR-6.3: VRAM is released after worker completion so subsequent operations can load different models.
 - FR-6.4: Database uses WAL mode with `busy_timeout=5000` and connection-per-thread to handle concurrent access from workers.
 
+### FR-7 Durable Processing and Media Safety (W1/W2)
+
+- FR-7.1: Every asset has a stable identity independent of duplicate camera filenames and drive mount names. Source originals are never rewritten by indexing.
+- FR-7.2: Each processing stage records its own input fingerprint, settings/model version, checkpoint, and explicit outcome. Another stage's timestamp cannot certify completion.
+- FR-7.3: Jobs survive process restart; unavailable media enters a visible waiting/offline state. Retrying or reconnecting does not duplicate committed work.
+- FR-7.4: Failed writes and cancelled work cannot publish successful completion. Previous valid results survive a failed replacement generation.
+- FR-7.5: Processing uses bounded batches, capacity checks, and a single coordinated inference scheduler. Progress includes real completed counts and measured elapsed time.
+- FR-7.6: Scene bounds, preview frames, transcripts, and selects retain actual source timestamps/timebase. Estimated sample precision is explicitly identified.
+
+### FR-8 Reviewed Selects and Premiere
+
+- FR-8.1: User can edit virtual scene/event/topic/take groups and save reviewed source in/out ranges without moving media; keyboard In/Out and transcript selection are core interactions.
+- FR-8.2: Each select records asset/generation, source range, ordering, note/rationale, and review state; human review can correct suggestions.
+- FR-8.3: Export provides a portable source manifest and tested Premiere-compatible markers/selects, with any selects-sequence format verified against the installed Premiere version. JSON/CSV alone is a review fallback, not claimed sequence interchange.
+- FR-8.4: Source frames, timecodes, frame rates, audio layout, original-media relinking, and a short render are checked in a separate Premiere test project.
+- FR-8.5: Preserve original transcripts and existing translations separately. Evaluate English speech, including Indian English accents; Hindi, code-switching and translation are deferred launch requirements. Identities/relationships require editor confirmation.
+
+### FR-9 Desktop Progress and Recovery
+
+- FR-9.1: Desktop GUI and local typed commands expose durable job IDs, status/events, pause/resume, cancellation and failed-item retry.
+- FR-9.2: Closing a dialog or losing a launcher does not erase committed work; repeated request identities deduplicate.
+- FR-9.3: Show truthful stage/source counts, failures, heartbeat, checkpoints, capacity and measured progress. ETA needs measured throughput.
+- FR-9.4: Present this in the chosen editor workflow. No phone interaction or mobile UI is a product acceptance gate.
+
+### FR-10 Footage Context Export — Accepted, Planned
+
+- Account for source coverage and omissions rather than imply exhaustive understanding.
+- Link original dialogue and visual observations to portable source/range references.
+- Keep translations, observations, interpretations, unknowns and editor corrections distinguishable.
+- Export readable and structured detail suitable for an external AI, with explicit privacy choices and context-size management.
+- Include readable and structured records/transcripts, optional contact sheets, a creative brief and source-linked paper edits with separate narration suggestions.
+- Version packs with stable references, corrections and gaps; support the project/scene-or-topic/clip/moment hierarchy.
+- Validate usefulness on the user’s own available projects. Detailed schema and context-size handling remain to be designed.
+
+### FR-11 In-App AI and Review — Accepted, Planned
+
+- Both in-app chat and external-AI packs use shared, inspectable source evidence.
+- Offer optional cloud analysis during project setup with clear input scope and cost; do not upload footage merely because cloud is available.
+- Default the home screen to a prominent search box and recent results (27B).
+- Synchronize player, filmstrip and transcript; clicking a quote reaches its source moment. Preserve notes, ranges and editor corrections.
+- Support a primary film and related cutdowns, aspect ratios and alternate versions.
+
+### FR-12 GitHub Release Updater — Accepted, Planned
+
+- Discover published releases, explain changes and provide the compatible installed-app update.
+- Apply at a safe restart, preserving projects, original media, jobs, settings and caches; recover from failures and incompatible schema changes.
+- App updates must not silently download new models or reprocess the full library.
+- Test actual installed upgrades on Apple Silicon Mac and Windows; see the [updater contract](docs/release-updater.md).
+
 ## 9. Non-Functional Requirements
 
 ### NFR-1 Stability
@@ -135,21 +244,21 @@ These features have backend implementation but are not wired into the standard u
 ### NFR-2 Performance
 
 - UI thread remains responsive (no blocking) during all background indexing and search operations.
-- Search results returned within 3 seconds on indexed projects up to 5,000 files (warm cache: <500ms).
-- Indexing throughput: at least 1 file per minute on CPU-only systems with default settings.
+- Proposed search target: p95 below 3 seconds on the declared hardware and representative indexed library, measured separately for cold/warm cache. File count alone is not a sufficient benchmark.
+- Measure throughput as media-minutes processed per wall-clock minute for each stage, with models/codecs/hardware recorded. Derive the full-run estimate from total footage duration and the sample; do not promise a constant files-per-minute rate.
 
 ### NFR-3 Compatibility
 
 | Platform | GPU Backend | Status |
 |---|---|---|
-| Windows 10/11 | CUDA (Turing 7.5 through Ada 8.9) | Primary, tested |
-| Windows 10/11 | CPU fallback | Tested |
-| macOS (Apple Silicon) | MPS | Secondary, functional |
-| macOS (Apple Silicon) | CPU fallback | Functional |
+| Windows 10/11 | CUDA | Implementation present; fresh installed-build validation pending |
+| Windows 10/11 | CPU fallback | Implementation present; fresh validation pending |
+| macOS (Apple Silicon) | MPS visual processing | Native Cocoa startup; real CLIP/BLIP-large/YOLOv8m samples pass on M4 Pro, macOS 27.2.1, torch 2.11.0 |
+| macOS (Apple Silicon) | CPU fallback / current Whisper path | Whisper small CPU/int8 and dlib HOG blank-image check pass; complete CPU-only visual workflow unverified |
 | Linux | Any | Untested, not officially supported |
 
-- **Known limitation:** RTX 5070 (sm_120 / Blackwell) requires PyTorch built with CUDA 12.8+. Current torch 2.10+cu126 supports up to sm_90. GPU falls back to CPU on unsupported architectures.
-- **Known mitigation:** PyQt6/torch DLL load-order conflict on Windows (`WinError 1114`) is resolved by `main.py` pre-importing torch before PyQt6 and stripping foreign Python directories from PATH.
+- **Validation requirement:** Record the actual GPU, driver, PyTorch build, and backend smoke result. Historical machine-specific CUDA package examples are not current compatibility guarantees.
+- **Existing mitigation:** `main.py` pre-imports torch before PyQt6 on Windows and strips foreign Python directories from PATH; re-test the installed package for the original DLL load-order issue.
 
 ### NFR-4 Data Safety
 
@@ -159,14 +268,15 @@ These features have backend implementation but are not wired into the standard u
 
 ### NFR-5 Storage
 
-- Database footprint (SQLite + ChromaDB embeddings) should remain under 500MB for projects with up to 5,000 indexed files.
-- Proxy videos and thumbnails are opt-in to avoid unexpected disk usage.
+- Estimate metadata/vector/proxy growth from sampled media duration and stage settings, then enforce a configured budget and free-space reserve on each destination.
+- Proxies are opt-in; thumbnails default to enabled in the current implementation. Both must have explicit output locations and collision-free source identity.
+- Keep source media, project metadata, model cache, temporary outputs, and editing proxies separately identifiable and recoverable. Offline media does not remove its catalog entries.
 
 ### NFR-6 First-Run Experience
 
 - AI models are downloaded on first use (lazy loading), not at install time.
 - Pre-download dialog shows cache status and allows users to download models proactively.
-- Total model download size: approximately 5–8 GB (CLIP ~600MB, BLIP ~1GB, Whisper large-v3 ~3GB, YOLO ~50MB, LLM ~2GB). Users on slow connections should be warned.
+- Preflight reports selected models, cache hits, and estimated download/storage needs before fetching. Actual requirements must be measured; full optional-model download is not required for the first wedding sample.
 
 ## 10. System Context
 
@@ -202,6 +312,8 @@ User (GUI)
 - **M3 — Settings trust:** Zero user-reported "setting doesn't apply" bugs in first 30 days of beta.
 - **M4 — Platform coverage:** Beta checklist passes on Windows 10/11 (CUDA + CPU) and macOS Apple Silicon (MPS + CPU).
 - **M5 — Search quality:** Users can locate a known clip by natural-language description within the first 5 results on 80% of attempts (measured via beta feedback).
+- **M6 — Wedding evidence:** At least 30 reviewed queries, representative 10–20 GB pilot, approximately 100 GB recovery test, then a reconciled approximately 800 GB run.
+- **M7 — Editor outcome (proposed):** An editor develops a useful source-cited paper edit/context brief and can review its evidence; the agreed Premiere handoff has verified original frames/audio/relink. Final task and pass threshold follow discovery.
 
 ## 12. Acceptance Criteria (Beta Exit)
 
@@ -214,24 +326,28 @@ User (GUI)
 - No unresolved data-loss, corruption, or silent-failure defects.
 - Invalid settings values (None, wrong types, corrupt JSON) recover to defaults without crash.
 - Release pipeline produces installable artifacts for Windows and macOS.
+- Interrupted/failed/cancelled jobs recover with truthful per-stage outcomes; no false-success records or derivative collisions remain.
+- The agreed editor/Premiere workflow passes with recorded hardware/app/codec versions; phone development access is evaluated separately.
 
 ## 13. Dependencies and Risks
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| Heavy model initialization and VRAM contention across workers | High | Lazy loading, VRAM release after worker completion, one model family active at a time |
+| Heavy model initialization and contention across workers | High | One coordinated scheduler and worker/model ownership; processing jobs now serialize and project process ownership protects embedded Chroma; interactive search and legacy watcher/translation coordination still need work |
 | Hardware variance (CUDA versions, MPS quirks, CPU-only) | High | Auto-detection in `AIBackend`, architecture-aware `TORCH_CUDA_ARCH_LIST`, graceful CPU fallback |
-| PyQt6/torch DLL load-order conflict on Windows | Medium | Resolved: `main.py` pre-imports torch, strips foreign Python from PATH |
-| FFmpeg not installed | Medium | `check_ffmpeg_available()` helper; proxy/thumbnail features fail gracefully with log warning |
-| Large-library memory pressure (>5,000 files) | Medium | Dynamic batch sizing via `core/performance.py`, paginated search results, incremental indexing |
-| First-run model download (5–8 GB) | Medium | Pre-download dialog with cache status; lazy loading defers until needed |
+| PyQt6/torch DLL load-order conflict on Windows | Medium | Existing pre-import/PATH mitigation; installed-build regression validation pending |
+| FFmpeg unavailable on another installation | Medium | Mac launcher supplies Homebrew PATH; FFmpeg/FFprobe 9.1 and generated derivatives verified here; check other installations explicitly |
+| Long-clip and large-library memory pressure | High | Bounded scene/frame/transcript batches and measured limits; dynamic batch sizing alone is insufficient |
+| First-run model/environment capacity | High on this Mac | Default 20 GiB reserve/estimates enforced per filesystem; cached-only jobs. About 8.2 GiB free internally at the latest pipeline check fails preflight; manual model downloads are a separate path |
 | Third-party model availability (HuggingFace, Whisper, YOLO) | Low | Models are cached locally after first download; no runtime API calls except optional DeepL |
-| Schema migration complexity as features grow | Low | SQLite WAL mode, backward-compatible merging in SettingsManager, FaceDB auto-migration |
+| Schema migration and cross-store publication | High | Versioned migrations, backups, per-stage generations, reconciliation; WAL alone does not make SQLite/Chroma writes atomic |
 
 ## 14. Decisions (Resolved from Prior Open Questions)
 
 | Question | Decision |
 |---|---|
-| Which features are beta gate vs allowed to slip? | Face recognition and LLM summarization are post-beta polish (partially built, not in critical path). OCR and virtual collections are post-beta new features. |
-| Minimum supported hardware? | 8 GB RAM, any x86-64 CPU, Windows 10+ or macOS (Apple Silicon). GPU optional but recommended. |
-| Search latency SLO? | 3 seconds max on cold cache for projects up to 5,000 files. <500ms on warm cache (5-minute TTL). |
+| Which features gate the wedding workflow? | Superseded task order. Discovery will choose the first editor outcome and prioritize source review, context export, collections and Premiere handoff accordingly. |
+| Minimum supported hardware? | Establish from measured pilots for selected models. No validated 8 GB universal minimum is claimed. Mac Apple Silicon and Windows CUDA/CPU remain target platforms. |
+| Search latency target? | Proposed p95 <3 seconds on declared hardware/library; measure cold/warm cache separately. |
+| Phone usage? | Codex for development prompts/progress; outside CyneDirector product requirements. |
+| Editing integration? | Adobe Premiere; narrow, tested selects exchange. Format, scope and acceptance will follow discovery and the agreed NLE handoff in buildplan.md. |

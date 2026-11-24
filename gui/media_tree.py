@@ -11,6 +11,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QRunnable, QThreadPool, QObject, QSize,
 from PyQt6.QtGui import (QColor, QBrush, QDragEnterEvent, QDropEvent, QImage, 
                         QPixmap, QPainter, QIcon)
 from config import COLORS
+from core.source_state import media_path, media_available
 from core.media_engine import MediaEngine 
 
 # --- WORKER SIGNALS ---
@@ -26,16 +27,17 @@ class MediaLoaderWorker(QRunnable):
     Runs in a thread pool to load metadata for ONE file at a time.
     This allows multiple files to be processed in parallel.
     """
-    def __init__(self, file_path):
+    def __init__(self, file_path, project_path=None):
         super().__init__()
         self.path = file_path
+        self.project_path = project_path
         self.signals = WorkerSignals()
 
     def run(self):
         try:
             # 1. Get Technical Metadata (Resolution, FPS, Duration)
             # MediaEngine.get_metadata should satisfy: w, h, fps, duration_sec
-            w, h, fps, dur_sec = MediaEngine.get_metadata(self.path)
+            w, h, fps, dur_sec = MediaEngine.get_metadata(media_path(self.path,self.project_path))
             
             res_str = f"{w}x{h}" if w > 0 else "Unknown"
             fps_str = f"{fps:.2f}" if fps > 0 else "--"
@@ -126,7 +128,7 @@ class ThumbnailWorker(QRunnable):
                     return
             
             # Generate thumbnail
-            cap = cv2.VideoCapture(self.path)
+            cap = cv2.VideoCapture(media_path(self.path,self.project_path))
             if not cap.isOpened():
                 return
             
@@ -634,7 +636,7 @@ class MediaTree(QTreeWidget):
                 item_rect = self.visualItemRect(item)
                 if viewport_rect.intersects(item_rect):
                     file_path = item.text(10)
-                    if file_path and os.path.isfile(file_path):
+                    if file_path and media_available(file_path,self.project_path):
                         # Check if thumbnail already loaded
                         if file_path not in self.thumbnail_delegate.thumbnails:
                             visible_items.append((item, file_path))
@@ -749,7 +751,7 @@ class MediaTree(QTreeWidget):
     def handle_double_click(self, item, column):
         """Opens the player window when a file is double-clicked."""
         file_path = item.text(10)  # Column 10 contains the full path
-        if file_path and os.path.exists(file_path):
+        if file_path and media_available(file_path,self.project_path):
             # Emit signal to main window to open player
             self.double_clicked_signal.emit(file_path)
 
@@ -928,6 +930,9 @@ class MediaTree(QTreeWidget):
     # --- FILE ADDING (HIERARCHICAL) ---
     def add_files_flat(self, file_paths):
         """Add files in hierarchical folder structure. Kept name for backward compatibility."""
+        # Resolve aliases to existing metadata keys, never re-key project records.
+        from core.database import Database
+        file_paths=[Database().source_key(p) for p in file_paths]
         # 1. Filter existing
         new_files = [p for p in file_paths if self.norm(p) not in self.item_map]
         if not new_files: return
@@ -981,7 +986,7 @@ class MediaTree(QTreeWidget):
                 self.item_map[self.norm(path)] = file_item
                 
                 # Queue Background Worker
-                worker = MediaLoaderWorker(path)
+                worker = MediaLoaderWorker(path,self.project_path)
                 worker.signals.finished.connect(self.update_item_metadata)
                 self.thread_pool.start(worker)
             
@@ -1314,7 +1319,7 @@ class MediaTree(QTreeWidget):
             if item.childCount() == 0:
                 # This is a file
                 path = item.text(10)
-                if path and os.path.isfile(path):  # Verify it's actually a file
+                if path:  # Keep offline sources in the project
                     paths.append(path)
             else:
                 # This is a folder, recurse
@@ -1333,7 +1338,7 @@ class MediaTree(QTreeWidget):
             if item.childCount() == 0:
                 # This is a file
                 path = item.text(10)
-                if path and os.path.isfile(path):
+                if path:
                     paths.append(path)
             else:
                 # This is a folder - collect all file children
@@ -1341,8 +1346,8 @@ class MediaTree(QTreeWidget):
                     for i in range(folder_item.childCount()):
                         child = folder_item.child(i)
                         if child.childCount() == 0:
-                            path = child.text(9)
-                            if path and os.path.isfile(path):
+                            path = child.text(10)
+                            if path:
                                 paths.append(path)
                         else:
                             collect_files(child)
@@ -1359,7 +1364,7 @@ class MediaTree(QTreeWidget):
                 # This is a file
                 if item.checkState(0) == Qt.CheckState.Checked:  # Checkbox is in column 0
                     path = item.text(10)
-                    if path and os.path.isfile(path):
+                    if path:
                         paths.append(path)
             else:
                 # This is a folder, recurse to children

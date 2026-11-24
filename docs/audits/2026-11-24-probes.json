@@ -1,0 +1,69 @@
+{
+  "scope": "isolated source-level probes with synthetic collaborators; no real media or Qt runtime",
+  "results": [
+    {
+      "id": "F01",
+      "finding_observed": true,
+      "generated_names": [
+        "C0001_proxy.mp4",
+        "C0001_proxy.mp4"
+      ]
+    },
+    {
+      "id": "F02",
+      "finding_observed": true,
+      "operations_started": [
+        "index_visuals",
+        "transcribe_audio"
+      ],
+      "next_operation_status": "running",
+      "active_worker_reference_cleared": true
+    },
+    {
+      "id": "F03",
+      "finding_observed": true,
+      "workflow_running": true,
+      "current_operation_missing": true,
+      "pending_operations": 1
+    },
+    {
+      "id": "F04",
+      "finding_observed": true,
+      "stale_transcript_scheduled_after_visual_refresh": false
+    },
+    {
+      "id": "F05",
+      "finding_observed": true,
+      "failed_upsert_propagated": false,
+      "buffered_records_after_failure": 0
+    },
+    {
+      "id": "F06",
+      "finding_observed": true,
+      "description": "Any two scenes in a 100-second clip are assigned equal halves, independent of the actual cut.",
+      "stored_scene_ends_seconds": [
+        50.0,
+        100.0
+      ]
+    },
+    {
+      "id": "F07",
+      "finding_observed": true,
+      "cancellation_requested": true,
+      "last_scanned_written_after_cancellation": true,
+      "final_progress": 100
+    },
+    {
+      "id": "F08",
+      "finding_observed": true,
+      "exception": "TypeError",
+      "message": "'list' object is not a mapping"
+    },
+    {
+      "id": "F09",
+      "finding_observed": true,
+      "out_of_range_duration_retained": true,
+      "result_cache_retained_after_metadata_refresh": true
+    }
+  ]
+}

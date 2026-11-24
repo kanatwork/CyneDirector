@@ -55,9 +55,26 @@ class TranscribeTranslateWorker(QThread):
         self.is_running = False
     
     def run(self):
+        try:
+            from core.processing import processing_guard
+            with processing_guard(self.project_path, [self.video_path], ["transcribe_audio"]) as workspace:
+                if self.should_translate:
+                    from core.memory_budget import MemoryPolicy,MemoryBudgetExceeded
+                    from core.workspace import probe
+                    from config import get_setting
+                    limit=MemoryPolicy(get_setting("processing_memory_mib",256),get_setting("speech_chunk_seconds",180))
+                    from core.source_state import media_path
+                    if probe(media_path(self.video_path))["duration"]>limit.speech_seconds:
+                        raise MemoryBudgetExceeded("Legacy translation of long clips is not windowed; use bounded original-language jobs")
+                self._run_translation()
+        except Exception as exc:
+            self.finished_signal.emit(False, str(exc))
+
+    def _run_translation(self):
         """Main worker execution."""
         try:
             db = Database(self.project_path)
+            self.video_path=db.source_key(self.video_path)
             ai = AIBackend()
             
             original_segments = None
@@ -212,46 +229,61 @@ class TranscribeTranslateWorker(QThread):
     def _transcribe_audio(self, ai: AIBackend, db: Database) -> list:
         """Transcribe audio if not already done."""
         try:
-            signature = source_signature(self.video_path)
-            self.log_signal.emit("Loading Whisper model...")
-            
-            if self.mode == "accuracy":
-                model = ai.load_whisper()
-            else:
-                model_name, whisper_device, compute_type = ai.get_whisper_params("speed")
-                from faster_whisper import WhisperModel
-                try:
-                    model = WhisperModel(model_name, device=whisper_device, compute_type=compute_type)
-                except Exception:
-                    model = WhisperModel("large-v3", device=whisper_device, compute_type=compute_type)
-            
-            self.log_signal.emit("Transcribing audio in original language...")
-            # Don't use task="translate" here - we want the original language
-            # More sensitive VAD to catch all dialogue
-            whisper_language = get_whisper_language_hint()
-            if whisper_language:
-                self.log_signal.emit(f"Using transcription language preference: {whisper_language}")
-            transcribe_kwargs = {
-                "beam_size": 5,
-                "vad_filter": True,
-                "vad_parameters": dict(min_silence_duration_ms=200),  # More sensitive
-            }
-            if whisper_language:
-                transcribe_kwargs["language"] = whisper_language
-            segments, info = model.transcribe(self.video_path, **transcribe_kwargs)
-            
-            # Capture detected language from Whisper
-            detected_language = getattr(info, 'language', None)
-            if detected_language:
-                self.log_signal.emit(f"Detected language: {detected_language}")
-                db.update_metadata_key(self.video_path, "transcript_language", detected_language)
-            
-            segment_list = []
-            from core.translator import detect_segment_language
+            with db.reprocess(self.video_path, "transcript", source_signature(self.video_path),
+                              allowed=lambda: self.is_running) as staged:
+                return self._transcribe_audio_staged(ai, staged)
+        except Exception as e:
+            logger.error(f"Transcription error: {e}")
+            self.log_signal.emit(f"Transcription error: {e}")
+            return []
+
+    def _transcribe_audio_staged(self, ai, db):
+        self.log_signal.emit("Loading Whisper model...")
+
+        if self.mode == "accuracy":
+            model = ai.load_whisper()
+        else:
+            model_name, whisper_device, compute_type = ai.get_whisper_params("speed")
+            from faster_whisper import WhisperModel
+            try:
+                model = WhisperModel(model_name, device=whisper_device, compute_type=compute_type)
+            except Exception:
+                model = WhisperModel("large-v3", device=whisper_device, compute_type=compute_type)
+
+        self.log_signal.emit("Transcribing audio in original language...")
+        # Don't use task="translate" here - we want the original language
+        # More sensitive VAD to catch all dialogue
+        whisper_language = get_whisper_language_hint()
+        if whisper_language:
+            self.log_signal.emit(f"Using transcription language preference: {whisper_language}")
+        transcribe_kwargs = {
+            "beam_size": 5,
+            "vad_filter": True,
+            "vad_parameters": dict(min_silence_duration_ms=200),  # More sensitive
+        }
+        if whisper_language:
+            transcribe_kwargs["language"] = whisper_language
+        from core.memory_budget import MemoryPolicy, transcript_buffer
+        from core.bounded_speech import bounded_transcribe
+        from contextlib import closing
+        from config import get_setting
+        policy = MemoryPolicy(get_setting("processing_memory_mib",256),get_setting("speech_chunk_seconds",180))
+        segments, info = bounded_transcribe(model,self.video_path,self.project_path,db.generation,
+            policy,transcribe_kwargs,allowed=lambda:self.is_running)
+
+        # Capture detected language from Whisper
+        detected_language = getattr(info, 'language', None)
+        if detected_language:
+            self.log_signal.emit(f"Detected language: {detected_language}")
+            db.update_metadata_key(self.video_path, "transcript_language", detected_language)
+
+        segment_list = transcript_buffer(policy)
+        from core.translator import detect_segment_language
+        with closing(segments):
             for segment in segments:
                 if not self.is_running:
                     break
-                
+
                 text = segment.text.strip()
                 if text:
                     seg_dict = {
@@ -262,30 +294,25 @@ class TranscribeTranslateWorker(QThread):
                     # Detect and store language for each segment
                     detect_segment_language(seg_dict)
                     segment_list.append(seg_dict)
-            
-            # Detect gaps in transcription
-            # Estimate duration from last segment end time (add small buffer)
-            duration = segment_list[-1]['end'] + 1.0 if segment_list else 0
-            
-            from core.translator import detect_transcription_gaps
-            gaps = detect_transcription_gaps(segment_list, duration, max_gap_seconds=2.0)
-            if gaps:
-                total_gap_time = sum(g['duration'] for g in gaps)
-                self.log_signal.emit(f"Warning: Detected {len(gaps)} potential gaps totaling {total_gap_time:.1f}s")
-                db.update_metadata_key(self.video_path, "transcription_gaps", gaps)
-            
-            # Save transcript to database
-            if segment_list:
-                db.save_transcript(self.video_path, segment_list, source_signature=signature)
-                self.log_signal.emit(f"Saved {len(segment_list)} transcript segments")
-            
-            return segment_list
-            
-        except Exception as e:
-            logger.error(f"Transcription error: {e}")
-            self.log_signal.emit(f"Transcription error: {e}")
-            return []
     
+        # Detect gaps in transcription
+        # Estimate duration from last segment end time (add small buffer)
+        duration = segment_list[-1]['end'] + 1.0 if segment_list else 0
+
+        from core.translator import detect_transcription_gaps
+        gaps = detect_transcription_gaps(segment_list, duration, max_gap_seconds=2.0)
+        if gaps:
+            total_gap_time = sum(g['duration'] for g in gaps)
+            self.log_signal.emit(f"Warning: Detected {len(gaps)} potential gaps totaling {total_gap_time:.1f}s")
+            db.update_metadata_key(self.video_path, "transcription_gaps", gaps)
+
+        # Save transcript to database
+        db.save_transcript(self.video_path, segment_list)
+        self.log_signal.emit(f"Staged {len(segment_list)} transcript segments")
+
+        return segment_list
+
+
     def _translate_transcript(self, transcript: list, ai: AIBackend) -> list:
         """Translate transcript to English. Tries DeepL first, falls back to Whisper.
         Intelligently handles mixed-language transcripts by only translating non-English segments."""
@@ -483,7 +510,8 @@ class TranscribeTranslateWorker(QThread):
             }
             if whisper_language:
                 transcribe_kwargs["language"] = whisper_language
-            segments, info = model.transcribe(self.video_path, **transcribe_kwargs)
+            from core.source_state import media_path
+            segments, info = model.transcribe(media_path(self.video_path), **transcribe_kwargs)
             
             translated_segments = []
             for segment in segments:

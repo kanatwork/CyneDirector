@@ -63,6 +63,12 @@ class AudioWorker(VisualWorker):
         self.finished_signal.emit()
 
 
+class BlockingWorker(VisualWorker):
+    def run(self):
+        while self.is_running:
+            self.msleep(10)
+
+
 def run():
     faulthandler.dump_traceback_later(90, exit=True)
     app = QApplication.instance() or QApplication([])
@@ -135,12 +141,22 @@ def run():
             assert item.text(8) == "--", item.text(8)
             assert item.text(9) == "Synthetic wedding test", item.text(9)
             assert item.text(5) == item.text(6) == "✅"
+        # Exercise ownership of a real active background thread during close.
+        background = BlockingWorker([], directory)
+        window.background_indexer.current_worker = background
+        window.background_indexer.is_indexing = True
+        window.background_indexer.background_timer.start()
+        background.start()
+        assert background.isRunning()
         window.is_dirty = False
         window.close()
+        assert not background.isRunning()
+        assert window.background_indexer.current_worker is None
+        assert not window.background_indexer.background_timer.isActive()
         db.close()
         app.processEvents()
         assert not exceptions, exceptions
-        print("Two-stage workflow with real Qt threads: passed", flush=True)
+        print("Two-stage workflow and background shutdown with real Qt threads: passed", flush=True)
     faulthandler.cancel_dump_traceback_later()
 
 

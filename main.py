@@ -76,15 +76,14 @@ def main():
         myappid = f'cynedirector.app.main.{config.VERSION}' 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
+    # Qt requires this policy before creating the application object.
+    if hasattr(Qt.HighDpiScaleFactorRoundingPolicy, 'PassThrough'):
+        QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
     # 2. Initialize App
     app = QApplication(sys.argv)
     app.setApplicationName(config.APP_NAME)
     app.setApplicationVersion(config.VERSION)
-    
-    # --- HIGH DPI SCALING FIX ---
-    # Ensures the app looks crisp on 4K monitors
-    if hasattr(Qt.HighDpiScaleFactorRoundingPolicy, 'PassThrough'):
-        app.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     
     # --- SET APPLICATION ICON ---
     icon_path = config.ASSETS_DIR / "icon.svg"

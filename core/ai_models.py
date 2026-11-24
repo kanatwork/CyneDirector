@@ -6,6 +6,7 @@ import gc
 import threading
 from core.logger import get_logger
 from core.clip_features import as_clip_tensor
+from core.processing import model_load_options, whisper_load_options
 
 logger = get_logger(__name__)
 
@@ -198,8 +199,8 @@ class AIBackend:
                 from core.tags import get_tag_bank
 
                 model_name = "openai/clip-vit-large-patch14"
-                self.clip_processor = CLIPProcessor.from_pretrained(model_name, use_fast=True)
-                self.clip_model = CLIPModel.from_pretrained(model_name).to(self.device)
+                self.clip_processor = CLIPProcessor.from_pretrained(model_name, use_fast=True, **model_load_options())
+                self.clip_model = CLIPModel.from_pretrained(model_name, **model_load_options()).to(self.device)
 
                 # Pre-compute Tag Embeddings
                 print("   Building Vector Index...")
@@ -242,10 +243,10 @@ class AIBackend:
                     from transformers import Blip2Processor, Blip2ForConditionalGeneration
 
                     model_name = "Salesforce/blip2-opt-2.7b"
-                    self.blip_processor = Blip2Processor.from_pretrained(model_name, use_fast=True)
+                    self.blip_processor = Blip2Processor.from_pretrained(model_name, use_fast=True, **model_load_options())
                     self.blip_model = Blip2ForConditionalGeneration.from_pretrained(
                         model_name,
-                        dtype=self.dtype
+                        dtype=self.dtype, **model_load_options()
                     ).to(self.device)
 
                     return self.blip_model, self.blip_processor
@@ -258,10 +259,10 @@ class AIBackend:
                     from transformers import BlipProcessor, BlipForConditionalGeneration
 
                     model_name = "Salesforce/blip-image-captioning-large"
-                    self.blip_processor = BlipProcessor.from_pretrained(model_name, use_fast=True)
+                    self.blip_processor = BlipProcessor.from_pretrained(model_name, use_fast=True, **model_load_options())
                     self.blip_model = BlipForConditionalGeneration.from_pretrained(
                         model_name,
-                        dtype=self.dtype
+                        dtype=self.dtype, **model_load_options()
                     ).to(self.device)
 
                     return self.blip_model, self.blip_processor
@@ -277,7 +278,10 @@ class AIBackend:
             print(f"Loading YOLOv8m [{self.device}]...")
             try:
                 from ultralytics import YOLO
-                self.yolo_model = YOLO("yolov8m.pt")
+                weights = os.environ.get("CYNE_YOLO_WEIGHTS", "yolov8m.pt")
+                if os.environ.get("CYNE_JOB_OFFLINE") == "1" and not os.path.isfile(weights):
+                    raise FileNotFoundError("YOLO weights are not cached; job downloads are disabled")
+                self.yolo_model = YOLO(weights)
                 # Move to the active device (YOLO handles device internally via .to())
                 if self.device != "cpu":
                     self.yolo_model.to(self.device)
@@ -300,7 +304,8 @@ class AIBackend:
             compute_type = "float16"
             speed_model = "medium"
         else:
-            # MPS and CPU both use the CPU path — faster-whisper has no MPS support.
+            # Mac speech uses the validated CPU/int8 path. Experimental MPS
+            # speech backends are not enabled by this application's settings.
             # Use a smaller model in speed mode because CPU is much slower.
             whisper_device = "cpu"
             compute_type = "int8"
@@ -326,7 +331,7 @@ class AIBackend:
             print(f"Loading Whisper {model_name} [{whisper_device}]...")
             try:
                 from faster_whisper import WhisperModel
-                self.whisper_model = WhisperModel(model_name, device=whisper_device, compute_type=compute_type)
+                self.whisper_model = WhisperModel(model_name, device=whisper_device, compute_type=compute_type, **whisper_load_options())
             except Exception as e:
                 print(f"WHISPER FAILED: {e}")
                 raise e
@@ -355,12 +360,12 @@ class AIBackend:
                         bnb_4bit_quant_type="nf4"
                     )
 
-                    self.llm_tokenizer = AutoTokenizer.from_pretrained(model_name)
+                    self.llm_tokenizer = AutoTokenizer.from_pretrained(model_name, **model_load_options())
                     self.llm_model = AutoModelForCausalLM.from_pretrained(
                         model_name,
                         quantization_config=quantization_config,
                         device_map="auto",
-                        dtype=self.dtype
+                        dtype=self.dtype, **model_load_options()
                     )
                     print("   LLM model loaded successfully (with 4-bit quantization)")
                     return self.llm_model, self.llm_tokenizer
@@ -370,11 +375,11 @@ class AIBackend:
                     try:
                         model_name = "microsoft/Phi-3-mini-4k-instruct"
 
-                        self.llm_tokenizer = AutoTokenizer.from_pretrained(model_name)
+                        self.llm_tokenizer = AutoTokenizer.from_pretrained(model_name, **model_load_options())
                         self.llm_model = AutoModelForCausalLM.from_pretrained(
                             model_name,
                             device_map="auto",
-                            dtype=self.dtype
+                            dtype=self.dtype, **model_load_options()
                         )
                         print("   LLM model loaded successfully (Phi-3-mini, no quantization)")
                         return self.llm_model, self.llm_tokenizer

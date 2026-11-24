@@ -1,0 +1,262 @@
+{
+  "date": "2026-11-24",
+  "timezone": "Asia/Kolkata",
+  "upstream_commit": "efd093023c2b30410a5f11553b251e94f69e9f88",
+  "branch": "codex/wedding-workflow-plan",
+  "changes": "local, uncommitted, not pushed",
+  "environment": {
+    "python": "3.11.18 (main, Oct 25 2026, 19:41:29) [Clang 21.0.0 (clang-2100.3.34.2)]",
+    "executable": "/Users/kanishkar/Desktop/The Tools/CyneDirector/.venv/bin/python",
+    "architecture": "arm64",
+    "macos": "27.2.1",
+    "hardware": "Apple M4 Pro",
+    "memory_bytes": 51539607552,
+    "qt": "6.8.2",
+    "pyqt": "6.8.1",
+    "packages": {
+      "torch": "2.11.0",
+      "torchvision": "0.26.0",
+      "transformers": "4.57.6",
+      "faster-whisper": "1.2.1",
+      "ctranslate2": "4.9.1",
+      "chromadb": "0.4.24",
+      "numpy": "1.26.4",
+      "opencv-python": "4.11.0.86",
+      "ultralytics": "8.4.218",
+      "dlib": "20.0.1",
+      "face-recognition": "1.3.0",
+      "face_recognition_models": "0.3.0",
+      "setuptools": "80.10.2",
+      "posthog": "3.25.0"
+    },
+    "ffmpeg": "ffmpeg version 9.1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "ffprobe": "ffprobe version 9.1 Copyright (c) 2007-2026 the FFmpeg developers",
+    "ffmpeg_path": "/opt/homebrew/bin/ffmpeg",
+    "ffprobe_path": "/opt/homebrew/bin/ffprobe",
+    "cmake": "cmake version 4.5.1",
+    "internal_free_bytes": 9300152320,
+    "internal_free_gib": 8.66,
+    "volumes": [
+      "Recovery",
+      "Macintosh HD"
+    ],
+    "pip_check": "No broken requirements found."
+  },
+  "native_startup": {
+    "stages": [
+      "welcome rendered",
+      "model dialog rendered; downloads skipped",
+      "main window rendered"
+    ],
+    "errors": [],
+    "platform": "cocoa"
+  },
+  "real_inference_cached_repeat": {
+    "torch": "2.11.0",
+    "device": "mps",
+    "mps_available": true,
+    "checks": {
+      "clip": {
+        "visual_shape": [
+          1,
+          768
+        ],
+        "text_shape": [
+          2,
+          768
+        ],
+        "tag_count": 13182,
+        "similarities_red_blue": [
+          0.25367629528045654,
+          0.2074839323759079
+        ],
+        "tensor_device": "mps:0",
+        "elapsed_seconds": 11.95
+      },
+      "blip": {
+        "caption": "a photo of a red square with a white background",
+        "model_device": "mps:0",
+        "elapsed_seconds": 0.98
+      },
+      "whisper": {
+        "model": "small",
+        "backend": [
+          "cpu",
+          "int8"
+        ],
+        "transcript": "On our wedding day, I promise to stand by your side.",
+        "segments": [
+          {
+            "start": 0.0,
+            "end": 3.08
+          }
+        ],
+        "elapsed_seconds": 6.57
+      },
+      "yolo": {
+        "fixture": "ultralytics packaged bus.jpg",
+        "labels": [
+          "bus",
+          "person",
+          "person",
+          "person",
+          "person"
+        ],
+        "model_device": "mps:0",
+        "result_device": "mps:0",
+        "elapsed_seconds": 0.62
+      },
+      "faces": {
+        "backend": "dlib HOG / CPU",
+        "blank_fixture_detections": [],
+        "elapsed_seconds": 0.7
+      }
+    }
+  },
+  "checks": [
+    {
+      "command": ".venv/bin/python -m tests.smoke_search",
+      "passed": 33,
+      "exit_code": 0,
+      "kind": "isolated/stubbed search"
+    },
+    {
+      "command": ".venv/bin/python -m unittest tests.test_review_regressions -q",
+      "passed": 21,
+      "exit_code": 0,
+      "kind": "isolated failure/settings regressions"
+    },
+    {
+      "command": ".venv/bin/python -m unittest tests.test_safe_reprocessing -q",
+      "passed": 28,
+      "skipped": 0,
+      "exit_code": 0,
+      "kind": "publication/timing with real Chroma and OpenCV plus doubles"
+    },
+    {
+      "command": ".venv/bin/python -m tests.runtime_smoke",
+      "exit_code": 0,
+      "kind": "real Qt threads, SQLite/Chroma, FFmpeg synthetic derivatives; AI worker doubles",
+      "observed": [
+        "distinct same-basename thumbnails/proxies",
+        "two-stage Qt workflow completed",
+        "active background worker stopped/joined on close"
+      ]
+    },
+    {
+      "command": ".venv/bin/python -m tests.macos_startup_smoke",
+      "exit_code": 0,
+      "kind": "native Cocoa main.main entry point with automated dialog choices; disposable project"
+    },
+    {
+      "command": ".venv/bin/python -m tests.macos_ai_smoke --offline",
+      "exit_code": 0,
+      "kind": "all five real-model/library checks; cached Hugging Face weights, local YOLO file; no network-isolation guarantee"
+    },
+    {
+      "command": "./setup_macos.sh",
+      "exit_code": 0,
+      "kind": "repeat on installed environment using exact lock; not fresh second-machine installation"
+    },
+    {
+      "command": ".venv/bin/python -m pip check",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n setup_macos.sh run.command scripts/macos_env.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "PYTHONPYCACHEPREFIX=/private/tmp/cyne-mac-pycache .venv/bin/python -m compileall -q core gui workers tests main.py config.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git -c core.whitespace=cr-at-eol diff --check",
+      "exit_code": 0,
+      "note": "Existing background_indexer.py uses CRLF; tolerate CR only, retain other whitespace checks"
+    }
+  ],
+  "score": {
+    "previous": 55,
+    "current": 60,
+    "out_of": 100,
+    "kind": "engineering judgment for wedding/Premiere/phone workflow, not code-completion percentage",
+    "dimensions": {
+      "media_integrity_recovery": [
+        20,
+        25
+      ],
+      "finding_moments": [
+        18,
+        20
+      ],
+      "premiere": [
+        2,
+        20
+      ],
+      "phone": [
+        4,
+        15
+      ],
+      "setup_compatibility": [
+        8,
+        10
+      ],
+      "validation_delivery": [
+        8,
+        10
+      ]
+    }
+  },
+  "preservation": {
+    "real_footage_used": false,
+    "original_projects_opened": false,
+    "wedding_ssd_mounted": false,
+    "fixtures": "temporary generated clips/images/speech and packaged ultralytics bus.jpg; existing recent-project state redirected for startup test",
+    "derivatives": "temporary directories, removed when tests exit; small verification images/screenshots/reports kept in ignored .cache/mac-verification"
+  },
+  "not_validated": [
+    "actual wedding codecs/languages/VFR/timecode",
+    "entire actual-worker end-to-end pipeline with real models and real media",
+    "large-v3, BLIP-2, LLM summary or DeepL translation",
+    "face identification/encodings on positive examples",
+    "full CPU-only visual workflow",
+    "Premiere import/export/relink/audio mapping",
+    "phone pairing or durable job interface",
+    "100/800 GB throughput/storage/recovery",
+    "clean second-Mac install, Intel Mac, Windows, packaging/notarization"
+  ],
+  "cache_snapshot_revisions": {
+    "models--openai--clip-vit-large-patch14": [
+      "32bd64288804d66eefd0ccbe215aa642df71cc41"
+    ],
+    "models--Salesforce--blip-image-captioning-large": [
+      "353689b859fcf0523410b1806dace5fb46ecdf41"
+    ],
+    "models--Systran--faster-whisper-small": [
+      "536b0662742c02347bc0e980a01041f333bce120"
+    ]
+  },
+  "source_sha256": {
+    "setup_macos.sh": "f3c40def383e0781de329edc073ca01ea0f735a0aef40248756136cb571737e5",
+    "run.command": "3c33a3ff3a820672f9454ffbd6738d6f945769a20ac62a6e720e559ab68b3cd8",
+    "scripts/macos_env.sh": "31df18f0e23d937bda1015bf69648b2e4e1d33a0bae7b514ea99f01b5ac0b20f",
+    "requirements-macos.lock": "60c1fc3dfddc1447c32eb88d598b2e69f64b8f8b076459286c5ee77125eda698",
+    "constraints-macos.txt": "6a2a3d55cfb5ba728bc4770a79d83bec5c7ee9b9d29d688f0612be35a3b837f8",
+    "main.py": "4c94a8a53f04d5c303bcb6a2c8a0a2357faaeab71f591d6d167e2647c7ea6181",
+    "core/ai_models.py": "88bc236717e7ea14d0bd67d78a022e8405970838c2c03666425db39e2ab5077b",
+    "core/background_indexer.py": "988d18e2a94ff15d037881982881509e5ca5a4855aecd8005cf630416501b10b",
+    "gui/main_window.py": "41db68a188b6b314e968c717116fecc23504b92a9dbb1dede1e9718dc849a56c",
+    "gui/search_tab.py": "d68692dc35ae3a35adc34f625e8b666590689a24cc357d851cdfafc6cb79e5f8",
+    "tests/runtime_smoke.py": "b57086797fb6eefa9cdf406c028d7b91b0ccfeb1b75d6d47b59d045e8fcf3f71",
+    "tests/macos_startup_smoke.py": "5122f66b62ab6593e41c912efe740540ea4cdd89d12c523c0d3d2b39f38f58d5",
+    "tests/macos_ai_smoke.py": "d698f95c0c5daaa135982ac68d067a79467242c92222cdd352e23c605b3a6453",
+    "core/generations.py": "73a5bdd3d2c2f74e6c1f94db155b636ecc1f6c0e098f99d3f5fb566007fe5eb1",
+    "core/scene_timing.py": "0d1ef6149a767913777b510c289631b684ff46574883c86a281dd1bce70e6db2",
+    "core/database.py": "9a8f2e9c6f35787c1b7d27d2db7636849246eb950eaf7b036a53900265dbdcd9",
+    "workers/indexer.py": "7c7207120c0144c69f9b413a5ffaf32ee6b38b982d6df7c56541c645590d95c3",
+    "workers/transcriber.py": "50213bb050372d2b43bdd2825924faa1b6c025918919778284678f8c80e1c1a4",
+    "workers/transcribe_translate_worker.py": "fad1a758af2ea209b6927a96be9d6f3862cb7114f51f6cfeea06e125fa0fff97",
+    "tests/test_safe_reprocessing.py": "372479665dffac41049a3a8a9e77f5f08bd69d906a31180433d171849075d055"
+  }
+}

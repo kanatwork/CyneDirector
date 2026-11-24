@@ -1,0 +1,414 @@
+{
+  "date": "2026-11-24",
+  "timezone": "Asia/Kolkata",
+  "upstream_commit": "efd093023c2b30410a5f11553b251e94f69e9f88",
+  "branch": "codex/wedding-workflow-plan",
+  "changes": "local, uncommitted, not pushed",
+  "readiness": {
+    "previous": 65,
+    "current": 67,
+    "maximum": 100,
+    "rubric": {
+      "media_integrity_recovery": 24,
+      "finding_useful_moments": 18,
+      "premiere_workflow": 2,
+      "phone_operation": 6,
+      "setup_compatibility": 8,
+      "validation_delivery": 9
+    }
+  },
+  "regressions": [
+    {
+      "module": "tests.smoke_search",
+      "passed": 33,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/memory-search-tests.log",
+      "log_sha256": "2325ec091c017ec771e6a207ee1e9504e07055e4a066c44cea5ad97c8fc438dd"
+    },
+    {
+      "module": "tests.test_review_regressions",
+      "passed": 23,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/memory-review-tests.log",
+      "log_sha256": "9179c4b00b6352b160e91b8a70faefcc1ad9a9cf34fdbb511f4603e7f6b80241"
+    },
+    {
+      "module": "tests.test_safe_reprocessing",
+      "passed": 28,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/memory-safe-tests.log",
+      "log_sha256": "bb6655b4027cc0260dc87ef4d35cf34cf35fd8271a2baa7b0f610cb3f1a8bd4d"
+    },
+    {
+      "module": "tests.test_workspace_jobs",
+      "passed": 39,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/memory-jobs-tests.log",
+      "log_sha256": "94293cb0843676538aca4b86b92400726206b69f7cd5cd55f250a7735aac2aec"
+    },
+    {
+      "module": "tests.test_memory_retention",
+      "passed": 41,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/memory-retention-tests.log",
+      "log_sha256": "ea4795323f3578475e727166733b5365b738e739133609eebd6a60e58cb6d382"
+    },
+    {
+      "module": "tests.test_worker_memory",
+      "passed": 3,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/worker-memory-tests.log",
+      "log_sha256": "043e1934ee3fceee124781b139fbf083dddd5e576f08d57531fd8f209219967a"
+    }
+  ],
+  "regression_total": 167,
+  "benchmark": {
+    "profiles": [
+      {
+        "sampled_frames": 5000,
+        "simulated_hours": 0.6944444444444444,
+        "dense_cuts": false,
+        "policy_mib": 64,
+        "python_peak_bytes": 6138515,
+        "process_peak_rss_bytes": 44122112,
+        "peak_live_resized_images": 17,
+        "maximum_frame_batch": 16,
+        "memory_stats": {
+          "processing_memory_mib": 64,
+          "metadata_bytes": 2097152,
+          "scene_record_limit": 2048,
+          "transcript_record_limit": 5120,
+          "metadata_nodes": 51200,
+          "scene_records": 1,
+          "transcript_records": 5120,
+          "frame_batch": 16,
+          "vector_batch": 64,
+          "retained_scene_images": 5,
+          "keyframe_tail": 5,
+          "speech_chunk_seconds": 180,
+          "max_decode_pixels": 9437184,
+          "scope": "application buffers; model, decoder and native allocator memory additional",
+          "peak_scene_images": 1,
+          "peak_frame_batch": 16,
+          "peak_keyframes": 0,
+          "scene_record_bytes": 121
+        },
+        "errors": [],
+        "stage_published": true,
+        "elapsed_seconds": 0.33846104200347327
+      },
+      {
+        "sampled_frames": 50000,
+        "simulated_hours": 6.944444444444445,
+        "dense_cuts": false,
+        "policy_mib": 64,
+        "python_peak_bytes": 6138515,
+        "process_peak_rss_bytes": 53116928,
+        "peak_live_resized_images": 17,
+        "maximum_frame_batch": 16,
+        "memory_stats": {
+          "processing_memory_mib": 64,
+          "metadata_bytes": 2097152,
+          "scene_record_limit": 2048,
+          "transcript_record_limit": 5120,
+          "metadata_nodes": 51200,
+          "scene_records": 1,
+          "transcript_records": 5120,
+          "frame_batch": 16,
+          "vector_batch": 64,
+          "retained_scene_images": 5,
+          "keyframe_tail": 5,
+          "speech_chunk_seconds": 180,
+          "max_decode_pixels": 9437184,
+          "scope": "application buffers; model, decoder and native allocator memory additional",
+          "peak_scene_images": 1,
+          "peak_frame_batch": 16,
+          "peak_keyframes": 0,
+          "scene_record_bytes": 121
+        },
+        "errors": [],
+        "stage_published": true,
+        "elapsed_seconds": 3.3580273329862393
+      },
+      {
+        "sampled_frames": 50000,
+        "simulated_hours": 6.944444444444445,
+        "dense_cuts": true,
+        "policy_mib": 64,
+        "python_peak_bytes": 9683239,
+        "process_peak_rss_bytes": 63569920,
+        "peak_live_resized_images": 21,
+        "maximum_frame_batch": 16,
+        "memory_stats": {
+          "processing_memory_mib": 64,
+          "metadata_bytes": 2097152,
+          "scene_record_limit": 2048,
+          "transcript_record_limit": 5120,
+          "metadata_nodes": 51200,
+          "scene_records": 2048,
+          "transcript_records": 5120,
+          "frame_batch": 16,
+          "vector_batch": 64,
+          "retained_scene_images": 5,
+          "keyframe_tail": 5,
+          "speech_chunk_seconds": 180,
+          "max_decode_pixels": 9437184,
+          "scope": "application buffers; model, decoder and native allocator memory additional",
+          "peak_scene_images": 5,
+          "peak_frame_batch": 16,
+          "peak_keyframes": 5
+        },
+        "errors": [
+          "/var/folders/rn/nkcg4d597y32f0d_q4fmtxbr0000gp/T/tmpiqr_do8b/Camera A/C0001.MP4: Complete record count exceeds 2048; stage not published"
+        ],
+        "stage_published": false,
+        "elapsed_seconds": 0.4001702090026811
+      }
+    ],
+    "actual_pcm": {
+      "leading_silence_preserved": true,
+      "later_window_correct": true,
+      "pcm_bytes": [
+        128000,
+        64000
+      ],
+      "source_hash_unchanged": true
+    },
+    "actual_whisper": {
+      "text": "On our wedding day, I promise to stand by your side.",
+      "stats": {
+        "chunks": 2,
+        "max_pcm_bytes": 104596,
+        "core_seconds": 2,
+        "overlap_seconds": 2,
+        "timestamps": "source-relative, word-midpoint ownership"
+      },
+      "segments": [
+        {
+          "start": 0,
+          "end": 1.9,
+          "text": "On our wedding day, I promise to"
+        },
+        {
+          "start": 1.9,
+          "end": 2.88,
+          "text": "stand by your side."
+        }
+      ]
+    },
+    "retention_query_cost": {
+      "before": {
+        "median_ms": 21.265896008117124,
+        "p95_ms": 36.49929101811722,
+        "max_candidates": 256,
+        "diagnostics": {
+          "mode": "paged_exact",
+          "scanned_rows": 1200,
+          "max_page_rows": 64,
+          "retained_results": 8,
+          "max_candidates": 256
+        },
+        "raw_vectors": 1200,
+        "visible_vectors": 300
+      },
+      "after": {
+        "median_ms": 14.856333495117724,
+        "p95_ms": 15.639000019291416,
+        "max_candidates": 256,
+        "diagnostics": {
+          "mode": "paged_exact",
+          "scanned_rows": 600,
+          "max_page_rows": 64,
+          "retained_results": 8,
+          "max_candidates": 256
+        },
+        "raw_vectors": 600,
+        "visible_vectors": 300
+      },
+      "restored_raw_vectors": 1200,
+      "note": "Logical vector removal; SQLite/HNSW file shrink is not guaranteed"
+    },
+    "fixtures": "Generated/simulated only; no actual wedding/SSD/long-model quality acceptance"
+  },
+  "actual_cli_pipeline": {
+    "state": "completed",
+    "counts": {
+      "completed": 3
+    },
+    "transcript": "On our wedding day, I promise to stand by your side.",
+    "visual_generation": "8401729b73a24ffda86c46de5ec7bc54",
+    "transcript_generation": "115830a6495f4af4908fc40a205e343f",
+    "visual_vectors": 6,
+    "transcript_vectors": 1,
+    "visual_processing_memory": {
+      "processing_memory_mib": 256,
+      "metadata_bytes": 8388608,
+      "scene_record_limit": 8192,
+      "transcript_record_limit": 20480,
+      "metadata_nodes": 204800,
+      "scene_records": 1,
+      "transcript_records": 20480,
+      "frame_batch": 32,
+      "vector_batch": 64,
+      "retained_scene_images": 5,
+      "keyframe_tail": 5,
+      "speech_chunk_seconds": 180,
+      "max_decode_pixels": 9437184,
+      "scope": "application buffers; model, decoder and native allocator memory additional",
+      "peak_scene_images": 1,
+      "peak_frame_batch": 6,
+      "peak_keyframes": 0,
+      "scene_record_bytes": 136
+    },
+    "speech_processing_memory": {
+      "processing_memory_mib": 256,
+      "metadata_bytes": 8388608,
+      "scene_record_limit": 8192,
+      "transcript_record_limit": 20480,
+      "metadata_nodes": 204800,
+      "scene_records": 8192,
+      "transcript_records": 1,
+      "frame_batch": 32,
+      "vector_batch": 64,
+      "retained_scene_images": 5,
+      "keyframe_tail": 5,
+      "speech_chunk_seconds": 180,
+      "max_decode_pixels": 9437184,
+      "scope": "application buffers; model, decoder and native allocator memory additional",
+      "chunks": 1,
+      "max_pcm_bytes": 104596,
+      "core_seconds": 180,
+      "overlap_seconds": 2,
+      "timestamps": "source-relative, word-midpoint ownership",
+      "transcript_bytes": 107
+    },
+    "original_and_project_hashes_preserved": true,
+    "legacy_field_and_vector_preserved": true,
+    "derivatives_in_selected_workspace": true,
+    "test_reserve_bytes": 67108864,
+    "actual_cli_inference_stdout_is_json": true,
+    "production_default_preflight_ok": false,
+    "production_default_capacity": [
+      {
+        "paths": [
+          "/private/var/folders/rn/nkcg4d597y32f0d_q4fmtxbr0000gp/T/cyne-real-job-3mual_u4/project",
+          "/private/var/folders/rn/nkcg4d597y32f0d_q4fmtxbr0000gp/T/cyne-real-job-3mual_u4/generated",
+          "/Users/kanishkar/Desktop/The Tools/CyneDirector/.cache/huggingface"
+        ],
+        "estimated_additional_bytes": 16777216,
+        "free_bytes": 8969023488,
+        "reserve_bytes": 21474836480,
+        "required_bytes": 21491613696,
+        "ok": false
+      }
+    ],
+    "events": 45,
+    "attempts_after_repeat": [
+      1,
+      1,
+      1
+    ]
+  },
+  "native_startup": {
+    "stages": [
+      "welcome rendered",
+      "model dialog rendered; downloads skipped",
+      "main window rendered"
+    ],
+    "errors": [],
+    "platform": "cocoa"
+  },
+  "native_jobs_gui": {
+    "platform": "cocoa",
+    "native_dialog": "rendered and fits display",
+    "inventory_job": "completed",
+    "counts": {
+      "completed": 1
+    },
+    "worker_retired": true,
+    "configured_gui_queue": "completed",
+    "queue_counts": {
+      "completed": 2
+    },
+    "queue_test_uses_publication_adapter_double": true,
+    "stage_scopes_preserved": true,
+    "qt_errors": []
+  },
+  "other_checks": {
+    "qt_storage_ffmpeg_worker_handoff_background_shutdown": "passed",
+    "compilation": "passed",
+    "bash_script_syntax": "passed",
+    "git_whitespace_crlf_tolerated": "passed",
+    "pip_check": "No broken requirements found.",
+    "retention_and_submit_cli_help": "passed"
+  },
+  "preservation": {
+    "actual_wedding_footage_accessed": false,
+    "existing_user_project_opened": false,
+    "retention_applied_to_user_data": false,
+    "actual_full_library_run": false,
+    "volumes_observed": [
+      "Macintosh HD",
+      "Recovery"
+    ],
+    "test_fixtures": "Generated/simulated media and disposable projects only; test paths removed"
+  },
+  "scope_limits": [
+    "Application buffers are bounded; model/native/decoder/Chroma RSS is additional",
+    "Long duration profiles use simulated decode/models; real inference uses short generated media",
+    "Word-midpoint joins require real wedding-language quality acceptance",
+    "Legacy whole-library get and GUI/search caches can materialize data",
+    "Legacy long Whisper translation rejects rather than decodes a full long clip",
+    "Legacy and untracked generations/files never adopted or deleted",
+    "No automatic maintenance, physical SQLite/HNSW shrink, or enforced output quota",
+    "Root relinking, physical SSD/power-loss, actual phone and Premiere acceptance remain pending"
+  ],
+  "source_sha256": {
+    "core/memory_budget.py": "ac7734c1a6531e7cf500dd708d4618766731c848b770b356ecdf1421195319a5",
+    "core/bounded_speech.py": "1ec9b14b40a6d072812e547ef2fa86dd56afdce325074d800cee13d8c21911ab",
+    "core/retention.py": "f8b192ca4b72dc623ff1c669352305e3de38dc510268f8ca9614e59b62fcde37",
+    "core/generations.py": "f7bd8447da67e20041e0984dd38781fb68b7951162e784354e052aedf02a965c",
+    "core/database.py": "7f97a62bf0c6b8e8de99db41dae5a9804f8f0040cf81e5d3db17e9c1d373e47f",
+    "core/workspace.py": "aa05a20d6987a4ffeaf7189079dd9ec93d22ea9310c6c599af53e4e55d0e0454",
+    "core/processing.py": "1cff32e0b0ac190894492c49058539915f8a7445bde44e3952f921f01f9788ac",
+    "core/jobs.py": "1c3d4a73a6c7995720ac585238fcc8b8d75e73014c4600f01bbf94b62d354bf9",
+    "core/job_runner.py": "ec1eae2c3fcde690466a0a372640f294dbfe3f3e214d7d86fbf7320f4e1c103b",
+    "core/processing_lock.py": "4de04eb15a5e5c9ff2031d6343fb605adc3166486ce6d437bdae576795274a35",
+    "core/settings_manager.py": "b6b1fb4b927e6b0914a48233d579faab060145a46994decfffc575494c8fc6e6",
+    "workers/indexer.py": "d721f2e584b198389e8310ab918bdb642a92bb398774399beec35add766ec6da",
+    "workers/transcriber.py": "9e584979a839df51880559075cc289075448b6aa773ed790285f4b0ccc02ce46",
+    "workers/transcribe_translate_worker.py": "e2d3f2047238a1b2903d6db1b255a1e5347214903689ebd0f0df46d7b70c9bd0",
+    "cyne_cli.py": "1f4d74029aa0c8708cde3322fd0ddfaf6603f048a221acf912ca7f2c354cd554",
+    "tests/test_memory_retention.py": "f0dea27420219901ce67ba2ab7cf2ee759c2e3667510084e96c3c62c5b1935e0",
+    "tests/test_worker_memory.py": "bf7d81d48e3e80799f6f86677337091990eb1a244b4f0f2726dd8e08f4890c7b",
+    "tests/memory_retention_benchmark.py": "c5bad22216447853c3e0c8293d86ec48ff7a04027e06b367913b3e34ef0b09d7",
+    "tests/test_safe_reprocessing.py": "5045f2fb7ac08cca798f255734926927ae1aea324b42d128d4351f8efc6b2861",
+    "tests/test_workspace_jobs.py": "ed7573b0549c4f91ae9a68e3d5ef16fc03d83eb72ae667acd4e1e9f1b2b62019",
+    "tests/durable_runtime_smoke.py": "951e56dc0928fc47b1a4399c358acd868733f60b95edbf6654f130133e45b919",
+    "tests/workspace_gui_smoke.py": "271b4163e8633ca0ba09e79c3249706a8719dee573268db9403c73be65c5b94f",
+    "tests/runtime_smoke.py": "b57086797fb6eefa9cdf406c028d7b91b0ccfeb1b75d6d47b59d045e8fcf3f71",
+    "tests/macos_startup_smoke.py": "5122f66b62ab6593e41c912efe740540ea4cdd89d12c523c0d3d2b39f38f58d5"
+  },
+  "logs_sha256": {
+    ".cache/memory-search-tests.log": "2325ec091c017ec771e6a207ee1e9504e07055e4a066c44cea5ad97c8fc438dd",
+    ".cache/memory-review-tests.log": "9179c4b00b6352b160e91b8a70faefcc1ad9a9cf34fdbb511f4603e7f6b80241",
+    ".cache/memory-safe-tests.log": "bb6655b4027cc0260dc87ef4d35cf34cf35fd8271a2baa7b0f610cb3f1a8bd4d",
+    ".cache/memory-jobs-tests.log": "94293cb0843676538aca4b86b92400726206b69f7cd5cd55f250a7735aac2aec",
+    ".cache/memory-retention-tests.log": "ea4795323f3578475e727166733b5365b738e739133609eebd6a60e58cb6d382",
+    ".cache/worker-memory-tests.log": "043e1934ee3fceee124781b139fbf083dddd5e576f08d57531fd8f209219967a",
+    ".cache/memory-benchmark.log": "d8566d9868d5920c7b3426348bb1b6c77cfa5a0cfcbc00a2d6ea49bf403fa56b",
+    ".cache/memory-real-pipeline.log": "b9730f66b4dd400da72d46aca3a1208371ed300cd411e7f94caf1765f0eb433f",
+    ".cache/memory-runtime-smoke.log": "7561a6f312c3860fa3ed511630206876cdce5414ad806ee81b733f93274bb093",
+    ".cache/memory-startup-smoke.log": "2907164483604a862d93d6d8ba95b7b93fab67b2fc86c078b0f9bc27ce948013",
+    ".cache/memory-gui-smoke.log": "2c1a38331a05abb404ea1290eddd507cd0d033c450f16058989c6f941906ea59",
+    ".cache/memory-pip-check.log": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09",
+    ".cache/memory-retention-cli-help.log": "f933c1af0108223c35e5c07d5a3a7922385d220981803ea9f19936de9716a11b",
+    ".cache/memory-submit-cli-help.log": "a7fc24b534641853c093c1aac2c6e2297a1f42c90d7cce567a38a656f4a4ee51"
+  }
+}

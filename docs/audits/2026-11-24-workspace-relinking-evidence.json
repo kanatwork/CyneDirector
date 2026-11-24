@@ -1,0 +1,274 @@
+{
+  "date": "2026-11-24",
+  "timezone": "Asia/Kolkata",
+  "upstream_commit": "efd093023c2b30410a5f11553b251e94f69e9f88",
+  "branch": "codex/wedding-workflow-plan",
+  "changes": "local, uncommitted, not pushed",
+  "readiness": {
+    "previous": 67,
+    "current": 67,
+    "maximum": 100,
+    "reason": "Root/configuration implementation and synthetic recovery gates advanced; remaining points require physical storage, wedding, phone, Premiere and release acceptance. No points awarded for code alone.",
+    "rubric": {
+      "media_integrity_recovery": 24,
+      "finding_useful_moments": 18,
+      "premiere_workflow": 2,
+      "phone_operation": 6,
+      "setup_compatibility": 8,
+      "validation_delivery": 9
+    }
+  },
+  "regressions": [
+    {
+      "module": "tests.smoke_search",
+      "passed": 33,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/relink-search-tests.log",
+      "log_sha256": "00a75ee118ff5ad6d31acc3b59c0e5af1cbf334e2007320a0fe4fdd3fea7caaf"
+    },
+    {
+      "module": "tests.test_review_regressions",
+      "passed": 23,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/relink-review-tests.log",
+      "log_sha256": "bb6474250f8b30f0a7176c85c090bf19948ffa876d6b9eff67da720424f839b4"
+    },
+    {
+      "module": "tests.test_safe_reprocessing",
+      "passed": 28,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/relink-safe-tests.log",
+      "log_sha256": "f8a9ac90bbc3fc0d55dce130bc810f096a03b06f7252888eb3f6d8155e1e2c85"
+    },
+    {
+      "module": "tests.test_workspace_jobs",
+      "passed": 39,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/relink-jobs-tests.log",
+      "log_sha256": "01c083e176ee31da8ca503ff7b1ea6d5484f6021d2fcda8aa3277de6c93932ac"
+    },
+    {
+      "module": "tests.test_memory_retention",
+      "passed": 41,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/relink-retention-tests.log",
+      "log_sha256": "a458a2a50786d1809d765058c74c7469506e9bb1339c487833961587ac27eb4a"
+    },
+    {
+      "module": "tests.test_worker_memory",
+      "passed": 3,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/relink-worker-memory-tests.log",
+      "log_sha256": "5bbe920696b3a4f1382322fa7bb557d211e4e45c483a1b6d3ced748bf3e1add6"
+    },
+    {
+      "module": "tests.test_workspace_changes",
+      "passed": 34,
+      "skipped": 0,
+      "exit_code": 0,
+      "log": ".cache/relink-changes-tests.log",
+      "log_sha256": "3c0a9ba5be23993739ed49b178c61bfab6d1362e4971a343970edef2173d2a32"
+    }
+  ],
+  "regression_total": 201,
+  "actual_relocated_source_cli_pipeline": {
+    "state": "completed",
+    "counts": {
+      "completed": 3
+    },
+    "transcript": "On our wedding day, I promise to stand by your side.",
+    "visual_generation": "3ebfa328bb554f158c093e3827b7852b",
+    "transcript_generation": "bc9c2589b9a04ffab14c5ef00703be73",
+    "visual_vectors": 6,
+    "transcript_vectors": 1,
+    "visual_processing_memory": {
+      "processing_memory_mib": 256,
+      "metadata_bytes": 8388608,
+      "scene_record_limit": 8192,
+      "transcript_record_limit": 20480,
+      "metadata_nodes": 204800,
+      "scene_records": 1,
+      "transcript_records": 20480,
+      "frame_batch": 32,
+      "vector_batch": 64,
+      "retained_scene_images": 5,
+      "keyframe_tail": 5,
+      "speech_chunk_seconds": 180,
+      "max_decode_pixels": 9437184,
+      "scope": "application buffers; model, decoder and native allocator memory additional",
+      "peak_scene_images": 1,
+      "peak_frame_batch": 6,
+      "peak_keyframes": 0,
+      "scene_record_bytes": 136
+    },
+    "speech_processing_memory": {
+      "processing_memory_mib": 256,
+      "metadata_bytes": 8388608,
+      "scene_record_limit": 8192,
+      "transcript_record_limit": 20480,
+      "metadata_nodes": 204800,
+      "scene_records": 8192,
+      "transcript_records": 1,
+      "frame_batch": 32,
+      "vector_batch": 64,
+      "retained_scene_images": 5,
+      "keyframe_tail": 5,
+      "speech_chunk_seconds": 180,
+      "max_decode_pixels": 9437184,
+      "scope": "application buffers; model, decoder and native allocator memory additional",
+      "chunks": 1,
+      "max_pcm_bytes": 104596,
+      "core_seconds": 180,
+      "overlap_seconds": 2,
+      "timestamps": "source-relative, word-midpoint ownership",
+      "transcript_bytes": 107
+    },
+    "original_and_project_hashes_preserved": true,
+    "legacy_field_and_vector_preserved": true,
+    "derivatives_in_selected_workspace": true,
+    "test_reserve_bytes": 67108864,
+    "actual_cli_inference_stdout_is_json": true,
+    "relinked_before_pending_job_resumed": true,
+    "workspace_update_revision": 1,
+    "job_payload_asset_identity_and_metadata_keys_preserved": true,
+    "repeated_relink_apply_and_new_path_submit_are_idempotent": true,
+    "production_default_preflight_ok": false,
+    "production_default_capacity": [
+      {
+        "paths": [
+          "/private/var/folders/rn/nkcg4d597y32f0d_q4fmtxbr0000gp/T/cyne-real-job-01o4xdn6/project",
+          "/private/var/folders/rn/nkcg4d597y32f0d_q4fmtxbr0000gp/T/cyne-real-job-01o4xdn6/generated",
+          "/Users/kanishkar/Desktop/The Tools/CyneDirector/.cache/huggingface"
+        ],
+        "estimated_additional_bytes": 16777216,
+        "free_bytes": 8816930816,
+        "reserve_bytes": 21474836480,
+        "required_bytes": 21491613696,
+        "ok": false
+      }
+    ],
+    "events": 45,
+    "attempts_after_repeat": [
+      1,
+      1,
+      1
+    ]
+  },
+  "native_startup": {
+    "stages": [
+      "welcome rendered",
+      "model dialog rendered; downloads skipped",
+      "main window rendered"
+    ],
+    "errors": [],
+    "platform": "cocoa"
+  },
+  "native_jobs_configuration_gui": {
+    "platform": "cocoa",
+    "native_dialog": "rendered and fits display",
+    "inventory_job": "completed",
+    "counts": {
+      "completed": 1
+    },
+    "worker_retired": true,
+    "configured_gui_queue": "completed",
+    "queue_counts": {
+      "completed": 2
+    },
+    "queue_test_uses_publication_adapter_double": true,
+    "stage_scopes_preserved": true,
+    "gui_background_preview_apply_relink": "passed",
+    "original_key_preview_and_technical_metadata": "passed",
+    "offline_save_keeps_sources_and_custom_project_fields": true,
+    "stale_gui_editor_rejected": true,
+    "exact_reserve_preserved_during_relink": true,
+    "escape_cancel_and_parent_shutdown_join_verifier": true,
+    "qt_errors": []
+  },
+  "other_checks": {
+    "qt_storage_ffmpeg_worker_handoff_background_shutdown": "passed",
+    "compilation": "passed",
+    "bash_script_syntax": "passed",
+    "git_whitespace_crlf_tolerated": "passed",
+    "pip_check": "No broken requirements found.",
+    "workspace_cli_help": "passed"
+  },
+  "preservation": {
+    "actual_wedding_footage_accessed": false,
+    "existing_user_project_opened": false,
+    "relink_or_configuration_updates_applied_to_user_data": false,
+    "actual_full_library_run": false,
+    "volumes_observed": [
+      "Macintosh HD",
+      "Recovery"
+    ],
+    "test_fixtures": "Generated media and disposable projects only; directory renames/copies performed by fixtures to simulate different mount paths, never by app code; temporary fixture trees removed"
+  },
+  "scope_limits": [
+    "Physical SSD/exFAT/APFS remount, backup-copy, full-disk and power-loss acceptance remain open",
+    "Same-directory identity or full SHA-256 verification of every known source; unsealed offline different-identity copies rejected",
+    "Sealed hashes cover known asset/metadata/top-level .cyne sources, not unknown files or an SSD backup",
+    "Project/database, existing derivative-directory relocation and model-cache migration are not implemented",
+    "Old derived artifacts remain at pinned historical output locations; offline history does not block new writes",
+    "All processing settings and existing job payloads remain frozen; queued work uses current approved locations",
+    "Native GUI plan/apply and IO use real storage; queue publication and cancellation long-hash work use explicit doubles",
+    "Actual phone/Premiere/wedding quality and scale remain pending"
+  ],
+  "prior_memory_measurements": "docs/audits/2026-11-24-memory-retention-evidence.json; not rerun as part of this increment",
+  "source_sha256": {
+    "core/workspace.py": "294d99f539b0d321dcd8ba8585669a478456e8179156dd153049d1966174ec2b",
+    "core/workspace_changes.py": "c1ff7f54fca069e0b8cba10d897d8a4a81e1e47d2eec432ee03d676c3a744bc9",
+    "core/source_state.py": "103a8286b5241eb347b4ea1ab9814e5b5dbadd46c10140841498f3b25896d575",
+    "core/jobs.py": "0af4463828ddd3a2885f9a77f483d1ce3a5397fe8e98d62f8233e8647d3e17fb",
+    "core/job_runner.py": "3915998f4bc463b870f3641c959ce2a3cd33c9aca137e9d7d1faeaa06cd08b95",
+    "core/processing.py": "c83ff49c9a355e5703ce1919f10aee6e11489ea1cbd3b129f8737864c8120372",
+    "core/processing_lock.py": "4de04eb15a5e5c9ff2031d6343fb605adc3166486ce6d437bdae576795274a35",
+    "core/database.py": "16bb4126f72d2fbd6433418f2bd202eff3a5f6de9e8222ac8e47d7b6ef4be318",
+    "core/generations.py": "4e9daee3825dbcc5c9d91d5f2725b075b5188085d220a0dd0f025a1f78fa935b",
+    "core/retention.py": "1191d1ae8a560c39ade698d91a1c5075d918b00eaece53df8d3ab7a89ddf6b8e",
+    "core/bounded_speech.py": "fa0572b118203d5f93e20f135095cf828a6cdf98ac0f9125b18e9846820e7ce1",
+    "core/proxy_generator.py": "ecba4d9d6876927628a7b17fdcfe24fc54c0eb0afa06221e1045fa5fd448882f",
+    "workers/indexer.py": "2a878455756bb0e47b219109ac26bd23755762c79679461b4a6aa49fd1dc402a",
+    "workers/transcriber.py": "5c234249fe998f532cec1b91c9008009545ba1d3369b2188c8d4f8ba5fda98d7",
+    "workers/transcribe_translate_worker.py": "54853256de0c0c773c89601df9edeeba596f294097dd7ac2400ad0762ae1df18",
+    "gui/workspace_jobs_dialog.py": "66110a6ed2394abbc06dcecc93ddea958517705e4155dd350cd536841ffba6fd",
+    "gui/main_window.py": "9760ef32f2ae73f4cdd514ad4e2e23437681191b1e6e6db664b02d91354d7ac6",
+    "gui/media_tree.py": "e4ac0db8986bf03c553078d69820689c6b4fc1d5503763f65e40c67121a973d6",
+    "gui/search_tab.py": "021810a9ba0864852481e507c79cdd1cfb7abc6dbfb9a1097337c4374f4c1839",
+    "gui/embedded_player.py": "7248a985144e53d0a75814e37258afc63b4d2c20fd662f972c1d6372c37a2913",
+    "gui/player_window.py": "7b199968d7b9f339f2ff9afa247f6b283b318599c33d1e3abd5389a92095da88",
+    "cyne_cli.py": "354a143c5a29c426ae9c900426cfd30f21b0884ac1acdf60dc762f1abe19470f",
+    "tests/test_workspace_changes.py": "e14c9930bdcafbfb1d90187457690326f014ef95cc1790b4d66cf005a51aef30",
+    "tests/test_workspace_jobs.py": "b631cd6b24ebdc6a0d2ee03edd4beeab7551758f9f2fc1c607cb972a67556c03",
+    "tests/durable_runtime_smoke.py": "e394235a02a3891f784c94b43cf5504a99818e19a05b10a363b3046b5c744d83",
+    "tests/workspace_gui_smoke.py": "3548d6ee0d9d421d15a0511945a3693ffe043d4675bd9053774bdfb51bd87250",
+    "tests/runtime_smoke.py": "b57086797fb6eefa9cdf406c028d7b91b0ccfeb1b75d6d47b59d045e8fcf3f71",
+    "tests/macos_startup_smoke.py": "5122f66b62ab6593e41c912efe740540ea4cdd89d12c523c0d3d2b39f38f58d5"
+  },
+  "logs_sha256": {
+    ".cache/relink-search-tests.log": "00a75ee118ff5ad6d31acc3b59c0e5af1cbf334e2007320a0fe4fdd3fea7caaf",
+    ".cache/relink-review-tests.log": "bb6474250f8b30f0a7176c85c090bf19948ffa876d6b9eff67da720424f839b4",
+    ".cache/relink-safe-tests.log": "f8a9ac90bbc3fc0d55dce130bc810f096a03b06f7252888eb3f6d8155e1e2c85",
+    ".cache/relink-jobs-tests.log": "01c083e176ee31da8ca503ff7b1ea6d5484f6021d2fcda8aa3277de6c93932ac",
+    ".cache/relink-retention-tests.log": "a458a2a50786d1809d765058c74c7469506e9bb1339c487833961587ac27eb4a",
+    ".cache/relink-worker-memory-tests.log": "5bbe920696b3a4f1382322fa7bb557d211e4e45c483a1b6d3ced748bf3e1add6",
+    ".cache/relink-changes-tests.log": "3c0a9ba5be23993739ed49b178c61bfab6d1362e4971a343970edef2173d2a32",
+    ".cache/relink-real-pipeline.log": "f490c138c3caba7a7ca7abed0267b5e653aded1f15c97a6bcb6a32150b8219cf",
+    ".cache/relink-runtime-smoke.log": "2843f16fd351e38bc4797ffff2b1286f42af62f2362ada80e4f02885e929f7c3",
+    ".cache/relink-startup-smoke.log": "981ef3bc4072170c6ea98a0efe9f68b9558e621b55050fdf292068fb7a73005b",
+    ".cache/relink-gui-smoke.log": "20ba1bf27a46b17c1fa8a0e2902f175262379b9e606174046c11f6d0babe6f77",
+    ".cache/relink-pip-check.log": "9261363b733079a641c2e4cc9bc46ffa1d8336945a87f807b6cf68847dbc9b09",
+    ".cache/relink-cli-help.log": "bf6d264ffe6b0344021d96f56635eeee297561d0824086abf0087191ff9b4574",
+    ".cache/relink-cli-plan-help.log": "4ce110a59dc632fd7c02842644e29c22d052d93c41459509a8c68ac9ebbba134"
+  },
+  "screenshots_sha256": {
+    ".cache/durable-verification/workspace-jobs.png": "9cf3eb211b8d17678b0695d2960ee9aaba8a2744b5f54e404849df24980183a3",
+    ".cache/mac-verification/main-window.png": "f7e9aa080014202df16345eaf273d61fde73c0576959ef6e009b2dbd130af1ed"
+  }
+}

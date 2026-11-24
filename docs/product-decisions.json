@@ -1,0 +1,290 @@
+{
+  "version": 3,
+  "updated": "2026-11-24",
+  "source": "Explicit first-six and inline answers, completed by 27B and English-only launch clarification",
+  "confirmed_platforms": [
+    "Apple Silicon macOS",
+    "Windows PC"
+  ],
+  "excluded_platforms": [
+    "Intel macOS",
+    "CyneDirector mobile UI"
+  ],
+  "phone_scope": "Codex for development prompts and progress",
+  "decisions": [
+    {
+      "id": "q01",
+      "choice": "A",
+      "decision": "Solo editors and small teams making story-led films"
+    },
+    {
+      "id": "q02",
+      "choice": "A",
+      "decision": "Understand raw footage and develop a story grounded in it"
+    },
+    {
+      "id": "q03",
+      "choice": "C",
+      "decision": "Support weddings, fiction, documentaries, commercials and social content equally from launch"
+    },
+    {
+      "id": "q04",
+      "choice": "A",
+      "decision": "Desktop companion with reliable file-based Premiere handoff"
+    },
+    {
+      "id": "q05",
+      "choice": "C",
+      "decision": "Redesign the whole application before completing a workflow"
+    },
+    {
+      "id": "q06",
+      "choice": "A",
+      "decision": "Evidence-linked footage brief and useful paper edit as the first valuable result"
+    },
+    {
+      "id": "q07",
+      "choice": "A",
+      "decision": "Enter after footage offload/backup, before detailed logging and rough cutting",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q08",
+      "choice": "B",
+      "decision": "Prioritize finding a particular shot, performance or spoken line",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q09",
+      "choice": "A",
+      "decision": "One primary film with related cutdowns, aspect ratios and alternate versions",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q10",
+      "choice": "A",
+      "decision": "Suggested editable virtual scene/event/interview/take/topic groups; originals remain in place",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q11",
+      "choice": "A",
+      "decision": "Suggest matching sources/groups for confirmation; leave editing synchronization to Premiere",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q12",
+      "choice": "A",
+      "decision": "Video, separate production audio and scripts, briefs, schedules or shot lists",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q13",
+      "choice": "A",
+      "decision": "Quick coverage across every source, followed by deeper analysis where useful",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q14",
+      "choice": "A",
+      "decision": "English speech, including Indian English accents; preserve original transcripts. Hindi and multilingual/code-switching requirements deferred.",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2,
+      "original_decision": "Multilingual/code-switched speech, original transcripts and optional English translations",
+      "amendment_source": "Explicit subsequent user clarification: ditch Hindi; we do not need that now"
+    },
+    {
+      "id": "q15",
+      "choice": "A",
+      "decision": "Editable speaker labels with names assigned or confirmed by the editor",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q16",
+      "choice": "A",
+      "decision": "Timed shots, actions, subjects, framing and camera movement",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q17",
+      "choice": "A",
+      "decision": "Project roster/context guide, optional reference images and reviewed suggestions",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q18",
+      "choice": "A",
+      "decision": "Reviewable focus/shake/exposure/speech-clarity flags and notable sounds",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q19",
+      "choice": "A",
+      "decision": "Project overview → scenes/events/topics → clips → individual moments",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q20",
+      "choice": "C",
+      "decision": "Both portable external-AI export and in-app chat for launch",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q21",
+      "choice": "A",
+      "decision": "Readable brief, structured records and transcripts, with optional labeled contact sheets",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q22",
+      "choice": "A",
+      "decision": "Every source accounted for, timed records and explicit gaps/failures",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q23",
+      "choice": "A",
+      "decision": "Separate observations/quotes from interpretations, with unknowns and review status",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q24",
+      "choice": "A",
+      "decision": "Structured creative brief: audience, duration, tone, must-use material and exclusions",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q25",
+      "choice": "A",
+      "decision": "Paper edit with quotations, source ranges, visual coverage and separate narration suggestions",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q26",
+      "choice": "A",
+      "decision": "Versioned context packs with stable references and explicit changes/corrections/gaps",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q27",
+      "choice": "B",
+      "decision": "A prominent search box and recent results on the home screen",
+      "source": "Explicit subsequent inline answer 27b",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q28",
+      "choice": "A",
+      "decision": "Player, filmstrip and synchronized transcript together",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q29",
+      "choice": "A",
+      "decision": "Keyboard In/Out plus transcript selection, favorites, rejects and notes",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q30",
+      "choice": "A",
+      "decision": "Hover/scrub or click a quotation to reach the source moment immediately",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q31",
+      "choice": "A",
+      "decision": "Reviewed ranges as markers/selects via tested Premiere interchange",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q32",
+      "choice": "A",
+      "decision": "Premiere first; portable records support Resolve next",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q33",
+      "choice": "B",
+      "decision": "Optional cloud analysis offered during project setup",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q34",
+      "choice": "A",
+      "decision": "Mainstream Apple Silicon and Windows editing PCs; analysis tiers and NVIDIA-first Windows GPU acceleration",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q35",
+      "choice": "A",
+      "decision": "Useful progressive results during a session, optional deeper overnight processing",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    },
+    {
+      "id": "q36",
+      "choice": "B",
+      "decision": "Validate on the user's own available projects first",
+      "source": "Explicit user response to inline questionnaire 7–36",
+      "questionnaire_revision": 2
+    }
+  ],
+  "remaining_questions": [],
+  "model_review": "model-evaluation-2026-11-24.md",
+  "models_migrated": false,
+  "questionnaire_delivery": "Inline chat only; no pop-up forms",
+  "questionnaire_status": "36 of 36 answered; English-only launch clarification recorded",
+  "questionnaire_revision_note": "Inline questions 7–36 supersede earlier wording: q9 concerns deliverable variants, q19 knowledge hierarchy, q31 file-based handoff, q36 personal-project validation.",
+  "language_requirements": {
+    "languages": [
+      "English"
+    ],
+    "accent_requirements": [
+      "Indian English"
+    ],
+    "preserve_originals": true,
+    "code_switching_required": false,
+    "translation_required": false,
+    "deferred_languages": [
+      "Hindi"
+    ],
+    "scope_note": "English-first launch. Hindi, multilingual/code-switched speech and translation are deferred requirements; existing multilingual capabilities and data are preserved."
+  },
+  "additional_requirements": [
+    {
+      "id": "release_updater",
+      "requirement": "Easy software updates when a new GitHub Release is published",
+      "repository": "kanatwork/CyneDirector",
+      "status": "Accepted requirement; design and release implementation pending",
+      "proposed_experience": "Automatic release checks, release notes, user-triggered download/install at a safe restart",
+      "safety": "Preserve original footage, projects, jobs, settings and model caches; validate compatible release artifacts and recover from failed updates"
+    }
+  ],
+  "implementation_status": "Product requirements recorded. New redesign, in-app AI, context-pack/paper-edit, Premiere interchange and updater workflows are not implemented by this decision record."
+}
